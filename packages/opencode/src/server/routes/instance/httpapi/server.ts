@@ -14,8 +14,11 @@ import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
 import { Auth } from "@/auth"
 import { Bus } from "@/bus"
+import { CodeGraph } from "@/codegraph"
 import { Config } from "@/config/config"
 import { Command } from "@/command"
+import { WorkflowEvidence } from "@/workflow/evidence"
+import { WorkflowRuntime } from "@/workflow/runtime"
 import * as Observability from "@opencode-ai/core/effect/observability"
 import { File } from "@/file"
 import { FileWatcher } from "@/file/watcher"
@@ -232,6 +235,9 @@ export function createRoutes(
       Workspace.defaultLayer,
       Worktree.appLayer,
       Bus.layer,
+      CodeGraph.defaultLayer,
+      WorkflowEvidence.defaultLayer,
+      WorkflowRuntime.defaultLayer,
       AppFileSystem.defaultLayer,
       FetchHttpClient.layer,
       HttpServer.layerServices,

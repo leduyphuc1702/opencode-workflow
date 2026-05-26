@@ -25,6 +25,7 @@ export type TimelineRowMap = {
     previousAssistantPart: boolean
   }
   Thinking: { userMessageID: string; reasoningHeading?: string }
+  CodeGraphSync: { userMessageID: string; percent: number; message?: string }
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
@@ -54,6 +55,11 @@ export namespace TimelineRow {
     userMessageID: string
     reasoningHeading?: string
   }> {}
+  export class CodeGraphSync extends Data.TaggedClass("CodeGraphSync")<{
+    userMessageID: string
+    percent: number
+    message?: string
+  }> {}
   export class DiffSummary extends Data.TaggedClass("DiffSummary")<{
     userMessageID: string
     diffs: SummaryDiff[]
@@ -73,6 +79,7 @@ export namespace TimelineRow {
     | TurnDivider
     | AssistantPart
     | Thinking
+    | CodeGraphSync
     | DiffSummary
     | Error
     | Retry
@@ -90,6 +97,8 @@ export namespace TimelineRow {
         return `assistant-part:${row.userMessageID}:${row.group.key}`
       case "Thinking":
         return `thinking:${row.userMessageID}`
+      case "CodeGraphSync":
+        return `codegraph-sync:${row.userMessageID}`
       case "DiffSummary":
         return `diff-summary:${row.userMessageID}`
       case "Error":
@@ -113,7 +122,7 @@ export namespace Timeline {
     assistantMessages: AssistantMessage[],
     index: number,
     showReasoning: boolean,
-    status: SessionStatus["type"],
+    status: SessionStatus,
     isActive: boolean,
   ) {
     const rows: TimelineRow.TimelineRow[] = []
@@ -196,7 +205,17 @@ export namespace Timeline {
       assistantGroupIndex += 1
     })
 
-    if (isActive && status === "busy" && !error && (showReasoning ? assistantPartRefs.length === 0 : true)) {
+    if (isActive && status.type === "codegraph_syncing") {
+      rows.push(
+        new TimelineRow.CodeGraphSync({
+          userMessageID: userMessage.id,
+          percent: status.percent,
+          message: status.message,
+        }),
+      )
+    }
+
+    if (isActive && status.type === "busy" && !error && (showReasoning ? assistantPartRefs.length === 0 : true)) {
       const heading = assistantMessages
         .flatMap((message) => getMessageParts(message.id))
         .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))
@@ -210,7 +229,7 @@ export namespace Timeline {
       )
     }
 
-    if (isActive && status === "retry") rows.push(new TimelineRow.Retry({ userMessageID: userMessage.id }))
+    if (isActive && status.type === "retry") rows.push(new TimelineRow.Retry({ userMessageID: userMessage.id }))
 
     const diffs = (userMessage.summary?.diffs ?? [])
       .reduceRight<SummaryDiff[]>((result, diff) => {
@@ -220,7 +239,7 @@ export namespace Timeline {
         return result
       }, [])
       .reverse()
-    if (diffs.length > 0 && (status === "idle" || !isActive)) {
+    if (diffs.length > 0 && (status.type === "idle" || !isActive)) {
       rows.push(
         new TimelineRow.DiffSummary({
           userMessageID: userMessage.id,

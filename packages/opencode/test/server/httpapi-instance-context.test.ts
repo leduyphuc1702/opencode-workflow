@@ -306,4 +306,15 @@ describe("HttpApi instance context middleware", () => {
       expect(yield* Fiber.join(disposed)).toEqual({ directory: workspaceDir, workspace: workspace.id })
     }),
   )
+
+  it.live("does not create an instance for the project list route", () =>
+    Effect.gen(function* () {
+      yield* serveProbe("/project")
+
+      const response = yield* HttpClient.get("/project")
+
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toEqual({})
+    }),
+  )
 })

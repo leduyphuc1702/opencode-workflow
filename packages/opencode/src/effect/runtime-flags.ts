@@ -18,6 +18,8 @@ export class Service extends ConfigService.Service<Service>()("@opencode/Runtime
   disableChannelDb: bool("OPENCODE_DISABLE_CHANNEL_DB"),
   disableEmbeddedWebUi: bool("OPENCODE_DISABLE_EMBEDDED_WEB_UI"),
   disableExternalSkills: bool("OPENCODE_DISABLE_EXTERNAL_SKILLS"),
+  disableCodeGraph: bool("OPENCODE_DISABLE_CODEGRAPH"),
+  workflowStrictGraphFirst: bool("OPENCODE_WORKFLOW_STRICT_GRAPH_FIRST"),
   disableLspDownload: bool("OPENCODE_DISABLE_LSP_DOWNLOAD"),
   skipMigrations: bool("OPENCODE_SKIP_MIGRATIONS"),
   disableClaudeCodePrompt: Config.all({

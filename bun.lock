@@ -429,6 +429,7 @@
         "@ai-sdk/xai": "3.0.82",
         "@aws-sdk/credential-providers": "3.993.0",
         "@clack/prompts": "1.0.0-alpha.1",
+        "@colbymchenry/codegraph": "0.9.4",
         "@effect/opentelemetry": "catalog:",
         "@effect/platform-node": "catalog:",
         "@gitlab/opencode-gitlab-auth": "1.3.3",
@@ -1118,6 +1119,20 @@
     "@cloudflare/workerd-windows-64": ["@cloudflare/workerd-windows-64@1.20251118.0", "", { "os": "win32", "cpu": "x64" }, "sha512-2LV99AHSlpr8WcCb/BYbU2QsYkXLUL1izN6YKWkN9Eibv80JKX0RtgmD3dfmajE5sNvClavxZejgzVvHD9N9Ag=="],
 
     "@cloudflare/workers-types": ["@cloudflare/workers-types@4.20251008.0", "", {}, "sha512-dZLkO4PbCL0qcCSKzuW7KE4GYe49lI12LCfQ5y9XeSwgYBoAUbwH4gmJ6A0qUIURiTJTkGkRkhVPqpq2XNgYRA=="],
+
+    "@colbymchenry/codegraph": ["@colbymchenry/codegraph@0.9.4", "", { "optionalDependencies": { "@colbymchenry/codegraph-darwin-arm64": "0.9.4", "@colbymchenry/codegraph-darwin-x64": "0.9.4", "@colbymchenry/codegraph-linux-arm64": "0.9.4", "@colbymchenry/codegraph-linux-x64": "0.9.4", "@colbymchenry/codegraph-win32-arm64": "0.9.4", "@colbymchenry/codegraph-win32-x64": "0.9.4" }, "bin": { "codegraph": "npm-shim.js" } }, "sha512-E5HMrKKJ+578KQ4h1L7HDRb3tK7JJ8KHlSPDamY/35PvBuzQMvhfI8xGKPoPF8fT9gLFW+0sUzu3T2IXLWmh2A=="],
+
+    "@colbymchenry/codegraph-darwin-arm64": ["@colbymchenry/codegraph-darwin-arm64@0.9.4", "", { "os": "darwin", "cpu": "arm64" }, "sha512-hGWbFPXxU22tAxubX6x/FEieCJXdRx+gaZ/pEH+IlPeu+zQSib60RwefDrLrVLQpcBa0Kib2noNNbpWjfdInoQ=="],
+
+    "@colbymchenry/codegraph-darwin-x64": ["@colbymchenry/codegraph-darwin-x64@0.9.4", "", { "os": "darwin", "cpu": "x64" }, "sha512-Ol7OfSM7HaRtJualYeDBa/B49ktJMbeTt5Qm8HAK2lVsKdzwLoDax+pShBUfjrKiIQkUPeQefWqimBaCy6tauw=="],
+
+    "@colbymchenry/codegraph-linux-arm64": ["@colbymchenry/codegraph-linux-arm64@0.9.4", "", { "os": "linux", "cpu": "arm64" }, "sha512-c0e6f5XYHnvy7JpJGe4jbNku4MU8JDSB+BRF1IYfn4RxiKmSc2qYOM/rI+xJuZShaFFXE6zw1Qp5b4fo0PEtbw=="],
+
+    "@colbymchenry/codegraph-linux-x64": ["@colbymchenry/codegraph-linux-x64@0.9.4", "", { "os": "linux", "cpu": "x64" }, "sha512-zSQqQqhpYjhXIgUivr2Pe4Dj90ioYUCs6jZkKNwATX2KHDfJkDEKm6FqfFvGh+XWqprXfNmFhx2Hbz5kCh7syQ=="],
+
+    "@colbymchenry/codegraph-win32-arm64": ["@colbymchenry/codegraph-win32-arm64@0.9.4", "", { "os": "win32", "cpu": "arm64" }, "sha512-+8K691Oxi54uCQp7/PrVay4gJQcWUHrazMYaOhySisvJAxOjq8TTpFXLBpSaDchXdD+fCGdvzOj1nhdSEt7+Cw=="],
+
+    "@colbymchenry/codegraph-win32-x64": ["@colbymchenry/codegraph-win32-x64@0.9.4", "", { "os": "win32", "cpu": "x64" }, "sha512-/BoGmNzm8zAjmt9o4ENBQxsAhsrSZ1RG3LYxaB37U6ewCgcaRJ2D8Di3zOO2oRSTWYtmkH4AFSZ/3yKN8Vg3pA=="],
 
     "@corvu/utils": ["@corvu/utils@0.4.2", "", { "dependencies": { "@floating-ui/dom": "^1.6.11" }, "peerDependencies": { "solid-js": "^1.8" } }, "sha512-Ox2kYyxy7NoXdKWdHeDEjZxClwzO4SKM8plAaVwmAJPxHMqA0rLOoAsa+hBDwRLpctf+ZRnAd/ykguuJidnaTA=="],
 

@@ -121,6 +121,68 @@ describe("tool.registry", () => {
     }),
   )
 
+  it.instance("includes bundled CodeGraph codebase tools", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+
+      expect(ids).toContain("codebase_status")
+      expect(ids).toContain("codebase_context")
+      expect(ids).toContain("codebase_node")
+      expect(ids).toContain("codebase_trace")
+      expect(ids).toContain("codebase_explore")
+      expect(ids).toContain("workflow_state")
+      expect(ids).toContain("workflow_approve_plan")
+      expect(ids).toContain("workflow_break")
+      expect(ids).toContain("workflow_resume_break")
+    }),
+  )
+
+  it.instance("exposes workflow tools with usable descriptions and object schemas", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const agents = yield* Agent.Service
+      const tools = yield* registry.tools({
+        providerID: ProviderID.opencode,
+        modelID: ModelID.make("test"),
+        agent: yield* agents.defaultInfo(),
+      })
+      const workflowTools = ["workflow_state", "workflow_approve_plan", "workflow_break", "workflow_resume_break"]
+
+      for (const id of workflowTools) {
+        const tool = tools.find((item) => item.id === id)
+        if (!tool) throw new Error(`${id} was not registered`)
+        expect(tool.description.trim().length).toBeGreaterThan(0)
+        expect(ToolJsonSchema.fromTool(tool)).toMatchObject({ type: "object" })
+      }
+
+      const workflowBreak = tools.find((item) => item.id === "workflow_break")
+      const workflowApprovePlan = tools.find((item) => item.id === "workflow_approve_plan")
+      const workflowResumeBreak = tools.find((item) => item.id === "workflow_resume_break")
+      if (!workflowBreak || !workflowApprovePlan || !workflowResumeBreak) throw new Error("workflow tools missing")
+
+      expect(ToolJsonSchema.fromTool(workflowBreak)).toMatchObject({
+        required: ["taskSlice", "reason", "question"],
+        properties: {
+          taskSlice: { type: "string" },
+          reason: { type: "string" },
+          question: { type: "string" },
+        },
+      })
+      expect(ToolJsonSchema.fromTool(workflowApprovePlan)).toMatchObject({
+        required: ["plan"],
+        properties: { plan: { type: "string" } },
+      })
+      expect(ToolJsonSchema.fromTool(workflowResumeBreak)).toMatchObject({
+        required: ["breakRequestId", "answer"],
+        properties: {
+          breakRequestId: { type: "string" },
+          answer: { type: "string" },
+        },
+      })
+    }),
+  )
+
   scout.instance("shows repo research tools when experimental scout is enabled", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

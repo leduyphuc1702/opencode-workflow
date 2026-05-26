@@ -1,9 +1,15 @@
 import { Agent } from "@/agent/agent"
 import { Bus } from "@/bus"
+import { CodeGraph } from "@/codegraph"
 import { Command } from "@/command"
+import { InstanceState } from "@/effect/instance-state"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Permission } from "@/permission"
 import { PermissionID } from "@/permission/schema"
+import { ProjectID } from "@/project/schema"
 import { SessionShare } from "@/share/session"
+import { WorkflowEvidence } from "@/workflow/evidence"
+import { WorkflowRuntime } from "@/workflow/runtime"
 import { Session } from "@/session/session"
 import { SessionCompaction } from "@/session/compaction"
 import { MessageV2 } from "@/session/message-v2"
@@ -15,7 +21,7 @@ import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
-import { Cause, Effect, Option, Schema, Scope } from "effect"
+import { Cause, Effect, Exit, Option, Schema, Scope } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiError, HttpApiSchema } from "effect/unstable/httpapi"
@@ -43,6 +49,10 @@ const tryParseJson = (text: string) =>
     catch: () => new HttpApiError.BadRequest({}),
   })
 
+function codegraphPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
@@ -52,10 +62,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const compactSvc = yield* SessionCompaction.Service
     const runState = yield* SessionRunState.Service
     const agentSvc = yield* Agent.Service
+    const codegraph = yield* CodeGraph.Service
     const permissionSvc = yield* Permission.Service
+    const flags = yield* RuntimeFlags.Service
     const statusSvc = yield* SessionStatus.Service
     const todoSvc = yield* Todo.Service
     const summary = yield* SessionSummary.Service
+    const evidence = yield* WorkflowEvidence.Service
+    const workflow = yield* WorkflowRuntime.Service
     const bus = yield* Bus.Service
     const scope = yield* Scope.Scope
 
@@ -77,6 +91,45 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const requireSession = Effect.fn("SessionHttpApi.requireSession")(function* (sessionID: SessionID) {
       return yield* SessionError.mapStorageNotFound(session.get(sessionID))
+    })
+
+    const prepareCodeGraph = Effect.fn("SessionHttpApi.prepareCodeGraph")(function* (sessionID: SessionID) {
+      const instance = yield* InstanceState.context
+      if (flags.disableCodeGraph || instance.project.id === ProjectID.global) return
+      yield* workflow.transition({ sessionID, state: "codegraph_syncing" }).pipe(Effect.ignore)
+      const graph = yield* codegraph.ensureReady({
+        onProgress: (progress) =>
+          statusSvc.set(sessionID, {
+            type: "codegraph_syncing",
+            percent: codegraphPercent(progress.percent),
+            message: progress.message,
+          }),
+      })
+      const event = yield* evidence.append({
+        sessionID,
+        type: "graph_sync",
+        summary: "CodeGraph ready before session prompt",
+        data: { graph },
+      })
+      yield* workflow.transition({ sessionID, state: "brainstorming", evidenceId: event.id }).pipe(Effect.ignore)
+    })
+
+    const publishCodeGraphFailure = Effect.fn("SessionHttpApi.publishCodeGraphFailure")(function* (
+      sessionID: SessionID,
+      cause: Cause.Cause<unknown>,
+    ) {
+      yield* statusSvc.set(sessionID, { type: "idle" })
+      const event = yield* evidence.append({
+        sessionID,
+        type: "graph_sync",
+        summary: "CodeGraph sync failed before session prompt",
+        data: { error: Cause.pretty(cause) },
+      })
+      yield* workflow.transition({ sessionID, state: "failed", evidenceId: event.id }).pipe(Effect.ignore)
+      yield* bus.publish(Session.Event.Error, {
+        sessionID,
+        error: new NamedError.Unknown({ message: Cause.pretty(cause) }).toObject(),
+      })
     })
 
     const get = Effect.fn("SessionHttpApi.get")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -288,6 +341,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof PromptPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
+      yield* prepareCodeGraph(ctx.params.sessionID).pipe(
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            yield* publishCodeGraphFailure(ctx.params.sessionID, cause)
+            return yield* new HttpApiError.BadRequest({})
+          }),
+        ),
+      )
       const message = yield* promptSvc
         .prompt({
           ...ctx.payload,
@@ -304,12 +365,20 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof PromptPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
-      yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+      yield* Effect.gen(function* () {
+        const ready = yield* prepareCodeGraph(ctx.params.sessionID).pipe(Effect.exit)
+        if (Exit.isFailure(ready)) {
+          yield* publishCodeGraphFailure(ctx.params.sessionID, ready.cause)
+          return
+        }
+        yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID })
+      }).pipe(
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             yield* Effect.logError("prompt_async failed").pipe(
               Effect.annotateLogs({ sessionID: ctx.params.sessionID, cause }),
             )
+            yield* statusSvc.set(ctx.params.sessionID, { type: "idle" })
             yield* bus.publish(Session.Event.Error, {
               sessionID: ctx.params.sessionID,
               error: new NamedError.Unknown({ message: Cause.pretty(cause) }).toObject(),

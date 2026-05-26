@@ -58,6 +58,9 @@ import { DataMigration } from "@/data-migration"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { CodeGraph } from "@/codegraph"
+import { WorkflowEvidence } from "@/workflow/evidence"
+import { WorkflowRuntime } from "@/workflow/runtime"
 
 export const AppLayer = Layer.mergeAll(
   Npm.defaultLayer,
@@ -86,6 +89,9 @@ export const AppLayer = Layer.mergeAll(
   SessionStatus.defaultLayer,
   BackgroundJob.defaultLayer,
   RuntimeFlags.defaultLayer,
+  CodeGraph.defaultLayer,
+  WorkflowEvidence.defaultLayer,
+  WorkflowRuntime.defaultLayer,
   SessionRunState.defaultLayer,
   SessionProcessor.defaultLayer,
   SessionCompaction.defaultLayer,

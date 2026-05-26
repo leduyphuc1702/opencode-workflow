@@ -168,6 +168,35 @@ function TimelineThinkingRow(props: { reasoningHeading?: string; showReasoningSu
   )
 }
 
+function TimelineCodeGraphSyncRow(props: { percent: number; message?: string }) {
+  const percent = createMemo(() => Math.max(0, Math.min(100, Math.round(props.percent))))
+
+  return (
+    <div data-slot="session-turn-codegraph-sync" class="flex flex-col gap-2 text-13 text-text-weak max-w-96">
+      <div class="flex items-center gap-2 min-w-0">
+        <Icon name="server" size="small" class="shrink-0" />
+        <span class="text-text-base">CodeGraph {percent()}%</span>
+        <Show when={props.message}>
+          <span class="truncate">{props.message}</span>
+        </Show>
+      </div>
+      <div
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow={percent()}
+        class="h-1.5 w-full overflow-hidden rounded-full"
+        style={{ background: "var(--border-weaker-base)" }}
+      >
+        <div
+          class="h-full rounded-full transition-[width] duration-200 ease-out"
+          style={{ width: `${percent()}%`, background: "var(--icon-interactive-base)" }}
+        />
+      </div>
+    </div>
+  )
+}
+
 function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
   const language = useLanguage()
   const maxFiles = 10
@@ -412,7 +441,7 @@ export function MessageTimeline(props: {
             assistantMessagesByParent().get(userMessage.id) ?? emptyAssistantMessages,
             indexAccessor(),
             settings.general.showReasoningSummaries(),
-            sessionStatus().type,
+            sessionStatus(),
             activeMessageID() === userMessage.id,
           )
 
@@ -1202,6 +1231,19 @@ export function MessageTimeline(props: {
               <TimelineThinkingRow
                 reasoningHeading={thinkingRow().reasoningHeading}
                 showReasoningSummaries={settings.general.showReasoningSummaries()}
+              />
+            </div>
+          </TimelineRowFrame>
+        )
+      }
+      case "CodeGraphSync": {
+        const codeGraphSyncRow = row as Accessor<TimelineRowByTag<"CodeGraphSync">>
+        return (
+          <TimelineRowFrame row={codeGraphSyncRow}>
+            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+              <TimelineCodeGraphSyncRow
+                percent={codeGraphSyncRow().percent}
+                message={codeGraphSyncRow().message}
               />
             </div>
           </TimelineRowFrame>

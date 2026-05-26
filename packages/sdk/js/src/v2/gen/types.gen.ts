@@ -351,6 +351,11 @@ export type SessionStatus =
   | {
       type: "busy"
     }
+  | {
+      type: "codegraph_syncing"
+      percent: number
+      message?: string
+    }
 
 export type Project = {
   id: string

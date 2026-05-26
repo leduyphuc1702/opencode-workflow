@@ -15,6 +15,7 @@ import { Glob } from "@opencode-ai/core/util/glob"
 import * as Log from "@opencode-ai/core/util/log"
 import { Discovery } from "./discovery"
 import CUSTOMIZE_OPENCODE_SKILL_BODY from "./prompt/customize-opencode.md" with { type: "text" }
+import OPENCODE_WORKFLOW_SKILL_BODY from "./prompt/opencode-workflow.md" with { type: "text" }
 import { isRecord } from "@/util/record"
 
 const log = Log.create({ service: "skill" })
@@ -32,12 +33,16 @@ const SKILL_PATTERN = "**/SKILL.md"
 const CUSTOMIZE_OPENCODE_SKILL_NAME = "customize-opencode"
 const CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION =
   "Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring opencode itself."
+const OPENCODE_WORKFLOW_SKILL_NAME = "opencode-workflow"
+const OPENCODE_WORKFLOW_SKILL_DESCRIPTION =
+  "Use when running the bundled opencode-workflow orchestrator: CodeGraph-first codebase understanding, design-before-implementation approval gates, task-scoped remote skills, and sub-agent break/resume."
 
 export const Info = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),
   location: Schema.String,
   content: Schema.String,
+  source: Schema.optional(Schema.Literals(["built-in", "local", "remote"])),
 })
 export type Info = Schema.Schema.Type<typeof Info>
 
@@ -86,11 +91,13 @@ type State = {
 type DiscoveryState = {
   matches: string[]
   dirs: string[]
+  remoteDirs: string[]
 }
 
 type ScanState = {
   matches: Set<string>
   dirs: Set<string>
+  remoteDirs: Set<string>
 }
 
 export interface Interface {
@@ -101,7 +108,7 @@ export interface Interface {
   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
 }
 
-const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.Interface) {
+const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.Interface, source: Info["source"]) {
   const md = yield* Effect.tryPromise({
     try: () => ConfigMarkdown.parse(match),
     catch: (err) => err,
@@ -137,6 +144,7 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
     description: md.data.description,
     location: match,
     content: md.content,
+    source,
   }
 })
 
@@ -180,7 +188,7 @@ const discoverSkills = Effect.fnUntraced(function* (
   directory: string,
   worktree: string,
 ) {
-  const state: ScanState = { matches: new Set(), dirs: new Set() }
+  const state: ScanState = { matches: new Set(), dirs: new Set(), remoteDirs: new Set() }
 
   const externalDirs: string[] = []
   if (!disableExternalSkills) {
@@ -222,6 +230,7 @@ const discoverSkills = Effect.fnUntraced(function* (
   for (const url of cfg.skills?.urls ?? []) {
     const pulledDirs = yield* discovery.pull(url)
     for (const dir of pulledDirs) {
+      state.remoteDirs.add(dir)
       yield* scan(state, dir, SKILL_PATTERN)
     }
   }
@@ -229,11 +238,12 @@ const discoverSkills = Effect.fnUntraced(function* (
   return {
     matches: Array.from(state.matches),
     dirs: Array.from(state.dirs),
+    remoteDirs: Array.from(state.remoteDirs),
   }
 })
 
 const loadSkills = Effect.fnUntraced(function* (state: State, discovered: DiscoveryState, bus: Bus.Interface) {
-  yield* Effect.forEach(discovered.matches, (match) => add(state, match, bus), {
+  yield* Effect.forEach(discovered.matches, (match) => add(state, match, bus, remoteSource(discovered, match)), {
     concurrency: "unbounded",
     discard: true,
   })
@@ -276,6 +286,14 @@ export const layer = Layer.effect(
           description: CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION,
           location: "<built-in>",
           content: CUSTOMIZE_OPENCODE_SKILL_BODY,
+          source: "built-in",
+        }
+        s.skills[OPENCODE_WORKFLOW_SKILL_NAME] = {
+          name: OPENCODE_WORKFLOW_SKILL_NAME,
+          description: OPENCODE_WORKFLOW_SKILL_DESCRIPTION,
+          location: "<built-in>",
+          content: OPENCODE_WORKFLOW_SKILL_BODY,
+          source: "built-in",
         }
         yield* loadSkills(s, yield* InstanceState.get(discovered), bus)
         return s
@@ -305,7 +323,9 @@ export const layer = Layer.effect(
 
     const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
       const s = yield* InstanceState.get(state)
-      const list = Object.values(s.skills).toSorted((a, b) => a.name.localeCompare(b.name))
+      const list = Object.values(s.skills)
+        .filter((skill) => skill.source !== "remote")
+        .toSorted((a, b) => a.name.localeCompare(b.name))
       if (!agent) return list
       return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")
     })
@@ -348,6 +368,12 @@ export function fmt(list: Info[], opts: { verbose: boolean }) {
       .toSorted((a, b) => a.name.localeCompare(b.name))
       .map((skill) => `- **${skill.name}**: ${skill.description}`),
   ].join("\n")
+}
+
+function remoteSource(discovered: DiscoveryState, match: string): Info["source"] {
+  return discovered.remoteDirs.some((dir) => match === path.join(dir, "SKILL.md") || match.startsWith(dir + path.sep))
+    ? "remote"
+    : "local"
 }
 
 export * as Skill from "."

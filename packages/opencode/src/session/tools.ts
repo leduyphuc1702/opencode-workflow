@@ -11,13 +11,14 @@ import { ModelID } from "@/provider/schema"
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { MessageV2 } from "./message-v2"
 import * as Session from "./session"
 import { SessionProcessor } from "./processor"
 import { PartID } from "./schema"
 import * as Log from "@opencode-ai/core/util/log"
 import { EffectBridge } from "@/effect/bridge"
+import { WorkflowRuntime } from "@/workflow/runtime"
 
 const log = Log.create({ service: "session.tools" })
 
@@ -38,6 +39,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const registry = yield* ToolRegistry.Service
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
+  const workflow = yield* Effect.serviceOption(WorkflowRuntime.Service)
+
+  const beforeWorkflowTool = (input: WorkflowRuntime.BeforeToolInput): Effect.Effect<{ warning?: string }> =>
+    Option.isSome(workflow) ? workflow.value.beforeTool(input).pipe(Effect.orDie) : Effect.succeed({ warning: undefined })
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -90,9 +95,17 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
               { args },
             )
+            const guard = yield* beforeWorkflowTool({
+              workflowSessionID: input.session.parentID ?? input.session.id,
+              currentSessionID: input.session.id,
+              agent: input.agent.name,
+              tool: item.id,
+              args,
+            })
             const result = yield* item.execute(args, ctx)
             const output = {
               ...result,
+              output: guard.warning ? `[Workflow warning] ${guard.warning}\n\n${result.output}` : result.output,
               attachments: result.attachments?.map((attachment) => ({
                 ...attachment,
                 id: PartID.ascending(),
@@ -131,6 +144,13 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId },
             { args },
           )
+          yield* beforeWorkflowTool({
+            workflowSessionID: input.session.parentID ?? input.session.id,
+            currentSessionID: input.session.id,
+            agent: input.agent.name,
+            tool: key,
+            args,
+          })
           const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.gen(function* () {
             yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
             return yield* Effect.promise(() => execute(args, opts))

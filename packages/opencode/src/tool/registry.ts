@@ -55,6 +55,29 @@ import { Reference } from "@/reference/reference"
 import { BackgroundJob } from "@/background/job"
 import { SessionStatus } from "@/session/status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { CodeGraph } from "@/codegraph"
+import {
+  CodebaseAffectedTestsTool,
+  CodebaseCalleesTool,
+  CodebaseCallersTool,
+  CodebaseContextTool,
+  CodebaseExploreTool,
+  CodebaseFilesTool,
+  CodebaseImpactTool,
+  CodebaseNodeTool,
+  CodebaseSearchSymbolTool,
+  CodebaseStatusTool,
+  CodebaseTraceTool,
+} from "./codebase"
+import { WorkflowEvidence } from "@/workflow/evidence"
+import { WorkflowRuntime } from "@/workflow/runtime"
+import { Storage } from "@/storage/storage"
+import {
+  WorkflowApprovePlanTool,
+  WorkflowBreakTool,
+  WorkflowResumeBreakTool,
+  WorkflowStateTool,
+} from "./workflow"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -81,7 +104,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ToolRegistry") {}
 
-export const layer: Layer.Layer<
+const baseLayer: Layer.Layer<
   Service,
   never,
   | Config.Service
@@ -107,6 +130,9 @@ export const layer: Layer.Layer<
   | Format.Service
   | Truncate.Service
   | RuntimeFlags.Service
+  | CodeGraph.Service
+  | WorkflowEvidence.Service
+  | WorkflowRuntime.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -136,6 +162,21 @@ export const layer: Layer.Layer<
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const codebaseStatus = yield* CodebaseStatusTool
+    const codebaseFiles = yield* CodebaseFilesTool
+    const codebaseContext = yield* CodebaseContextTool
+    const codebaseSearchSymbol = yield* CodebaseSearchSymbolTool
+    const codebaseCallers = yield* CodebaseCallersTool
+    const codebaseCallees = yield* CodebaseCalleesTool
+    const codebaseImpact = yield* CodebaseImpactTool
+    const codebaseAffectedTests = yield* CodebaseAffectedTestsTool
+    const codebaseNode = yield* CodebaseNodeTool
+    const codebaseTrace = yield* CodebaseTraceTool
+    const codebaseExplore = yield* CodebaseExploreTool
+    const workflowState = yield* WorkflowStateTool
+    const workflowApprovePlan = yield* WorkflowApprovePlanTool
+    const workflowBreak = yield* WorkflowBreakTool
+    const workflowResumeBreak = yield* WorkflowResumeBreakTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -246,6 +287,21 @@ export const layer: Layer.Layer<
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          codebase_status: Tool.init(codebaseStatus),
+          codebase_files: Tool.init(codebaseFiles),
+          codebase_context: Tool.init(codebaseContext),
+          codebase_search_symbol: Tool.init(codebaseSearchSymbol),
+          codebase_callers: Tool.init(codebaseCallers),
+          codebase_callees: Tool.init(codebaseCallees),
+          codebase_impact: Tool.init(codebaseImpact),
+          codebase_affected_tests: Tool.init(codebaseAffectedTests),
+          codebase_node: Tool.init(codebaseNode),
+          codebase_trace: Tool.init(codebaseTrace),
+          codebase_explore: Tool.init(codebaseExplore),
+          workflow_state: Tool.init(workflowState),
+          workflow_approve_plan: Tool.init(workflowApprovePlan),
+          workflow_break: Tool.init(workflowBreak),
+          workflow_resume_break: Tool.init(workflowResumeBreak),
         })
 
         return {
@@ -266,6 +322,21 @@ export const layer: Layer.Layer<
             tool.search,
             ...(flags.experimentalScout ? [tool.repo_clone, tool.repo_overview] : []),
             tool.skill,
+            tool.codebase_status,
+            tool.codebase_files,
+            tool.codebase_context,
+            tool.codebase_search_symbol,
+            tool.codebase_callers,
+            tool.codebase_callees,
+            tool.codebase_impact,
+            tool.codebase_affected_tests,
+            tool.codebase_node,
+            tool.codebase_trace,
+            tool.codebase_explore,
+            tool.workflow_state,
+            tool.workflow_approve_plan,
+            tool.workflow_break,
+            tool.workflow_resume_break,
             tool.patch,
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
@@ -374,6 +445,11 @@ export const layer: Layer.Layer<
     return Service.of({ ids, all, named, tools })
   }),
 )
+
+export const layer = baseLayer.pipe(Layer.provide(CodeGraph.defaultLayer))
+  .pipe(Layer.provide(WorkflowRuntime.layer))
+  .pipe(Layer.provide(WorkflowEvidence.defaultLayer))
+  .pipe(Layer.provide(Storage.defaultLayer))
 
 export const defaultLayer = Layer.suspend(() =>
   layer

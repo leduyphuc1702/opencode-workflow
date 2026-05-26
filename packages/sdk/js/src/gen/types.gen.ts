@@ -463,6 +463,11 @@ export type SessionStatus =
   | {
       type: "busy"
     }
+  | {
+      type: "codegraph_syncing"
+      percent: number
+      message?: string
+    }
 
 export type EventSessionStatus = {
   type: "session.status"

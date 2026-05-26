@@ -9,7 +9,13 @@ import { ProviderTransform } from "@/provider/transform"
 
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
+import PROMPT_CODE_REVIEWER_WORKFLOW from "./prompt/code-reviewer-workflow.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
+import PROMPT_IMPLEMENTATION_AGENT_WORKFLOW from "./prompt/implementation-agent-workflow.txt"
+import PROMPT_ORCHESTRATOR_WORKFLOW from "./prompt/orchestrator-workflow.txt"
+import PROMPT_PLAN_AGENT_WORKFLOW from "./prompt/plan-agent-workflow.txt"
+import PROMPT_PLAN_FINALIZER_WORKFLOW from "./prompt/plan-finalizer-workflow.txt"
+import PROMPT_PLAN_REVIEWER_WORKFLOW from "./prompt/plan-reviewer-workflow.txt"
 import PROMPT_SCOUT from "./prompt/scout.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
@@ -127,6 +133,39 @@ export const layer = Layer.effect(
         const user = Permission.fromConfig(cfg.permission ?? {})
 
         const agents: Record<string, Info> = {
+          "orchestrator-agent": {
+            name: "orchestrator-agent",
+            description:
+              "Default opencode-workflow agent. Coordinates CodeGraph sync, design, plan approval, implementation, code review, and sub-agent break/resume.",
+            options: {},
+            prompt: PROMPT_ORCHESTRATOR_WORKFLOW,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                question: "allow",
+                task: "allow",
+                skill: "allow",
+                plan_enter: "allow",
+                codebase_status: "allow",
+                codebase_files: "allow",
+                codebase_context: "allow",
+                codebase_search_symbol: "allow",
+                codebase_callers: "allow",
+                codebase_callees: "allow",
+                codebase_impact: "allow",
+                codebase_affected_tests: "allow",
+                codebase_node: "allow",
+                codebase_trace: "allow",
+                codebase_explore: "allow",
+                workflow_state: "allow",
+                workflow_approve_plan: "allow",
+                workflow_resume_break: "allow",
+              }),
+              user,
+            ),
+            mode: "primary",
+            native: true,
+          },
           build: {
             name: "build",
             description: "The default agent. Executes tools based on configured permissions.",
@@ -198,6 +237,170 @@ export const layer = Layer.effect(
             ),
             description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
             prompt: PROMPT_EXPLORE,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          "plan-agent": {
+            name: "plan-agent",
+            description:
+              "opencode-workflow sub-agent that drafts CodeGraph-backed implementation plans without editing files.",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                task: "deny",
+                question: "deny",
+                skill: "allow",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                bash: "ask",
+                codebase_status: "allow",
+                codebase_files: "allow",
+                codebase_context: "allow",
+                codebase_search_symbol: "allow",
+                codebase_callers: "allow",
+                codebase_callees: "allow",
+                codebase_impact: "allow",
+                codebase_affected_tests: "allow",
+                codebase_node: "allow",
+                codebase_trace: "allow",
+                codebase_explore: "allow",
+                workflow_state: "allow",
+                workflow_break: "allow",
+                external_directory: readonlyExternalDirectory,
+              }),
+              user,
+            ),
+            prompt: PROMPT_PLAN_AGENT_WORKFLOW,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          "plan-reviewer": {
+            name: "plan-reviewer",
+            description:
+              "opencode-workflow sub-agent that critiques plans for risk, over-engineering, missing evidence, and missing verification.",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                task: "deny",
+                question: "deny",
+                skill: "allow",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                codebase_status: "allow",
+                codebase_context: "allow",
+                codebase_impact: "allow",
+                codebase_node: "allow",
+                codebase_trace: "allow",
+                codebase_explore: "allow",
+                workflow_state: "allow",
+                workflow_break: "allow",
+                external_directory: readonlyExternalDirectory,
+              }),
+              user,
+            ),
+            prompt: PROMPT_PLAN_REVIEWER_WORKFLOW,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          "plan-finalizer": {
+            name: "plan-finalizer",
+            description: "opencode-workflow sub-agent that produces the user-approved FinalPlan.",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                task: "deny",
+                question: "deny",
+                skill: "allow",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                codebase_status: "allow",
+                codebase_context: "allow",
+                codebase_impact: "allow",
+                codebase_node: "allow",
+                codebase_trace: "allow",
+                codebase_explore: "allow",
+                workflow_state: "allow",
+                workflow_break: "allow",
+                external_directory: readonlyExternalDirectory,
+              }),
+              user,
+            ),
+            prompt: PROMPT_PLAN_FINALIZER_WORKFLOW,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          "implementation-agent": {
+            name: "implementation-agent",
+            description: "opencode-workflow sub-agent that implements only after FinalPlan approval.",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                question: "deny",
+                task: "deny",
+                skill: "allow",
+                codebase_status: "allow",
+                codebase_files: "allow",
+                codebase_context: "allow",
+                codebase_search_symbol: "allow",
+                codebase_callers: "allow",
+                codebase_callees: "allow",
+                codebase_impact: "allow",
+                codebase_affected_tests: "allow",
+                codebase_node: "allow",
+                codebase_trace: "allow",
+                codebase_explore: "allow",
+                workflow_state: "allow",
+                workflow_break: "allow",
+              }),
+              user,
+            ),
+            prompt: PROMPT_IMPLEMENTATION_AGENT_WORKFLOW,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          "code-reviewer": {
+            name: "code-reviewer",
+            description: "opencode-workflow sub-agent that reviews implemented changes before final approval.",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                task: "deny",
+                question: "deny",
+                skill: "allow",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                bash: "ask",
+                codebase_status: "allow",
+                codebase_files: "allow",
+                codebase_context: "allow",
+                codebase_search_symbol: "allow",
+                codebase_callers: "allow",
+                codebase_callees: "allow",
+                codebase_impact: "allow",
+                codebase_affected_tests: "allow",
+                codebase_node: "allow",
+                codebase_trace: "allow",
+                codebase_explore: "allow",
+                workflow_state: "allow",
+                workflow_break: "allow",
+                external_directory: readonlyExternalDirectory,
+              }),
+              user,
+            ),
+            prompt: PROMPT_CODE_REVIEWER_WORKFLOW,
             options: {},
             mode: "subagent",
             native: true,
@@ -335,7 +538,7 @@ export const layer = Layer.effect(
             agents,
             values(),
             sortBy(
-              [(x) => (cfg.default_agent ? x.name === cfg.default_agent : x.name === "build"), "desc"],
+              [(x) => (cfg.default_agent ? x.name === cfg.default_agent : x.name === "orchestrator-agent"), "desc"],
               [(x) => x.name, "asc"],
             ),
           )
@@ -350,7 +553,8 @@ export const layer = Layer.effect(
             if (agent.hidden === true) throw new Error(`default agent "${c.default_agent}" is hidden`)
             return agent
           }
-          const visible = Object.values(agents).find((a) => a.mode !== "subagent" && a.hidden !== true)
+          const visible =
+            agents["orchestrator-agent"] ?? Object.values(agents).find((a) => a.mode !== "subagent" && a.hidden !== true)
           if (!visible) throw new Error("no primary visible agent found")
           return visible
         })

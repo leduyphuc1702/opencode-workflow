@@ -8,6 +8,14 @@ import type { Configuration } from "electron-builder"
 const execFileAsync = promisify(execFile)
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const signScript = path.join(rootDir, "script", "sign-windows.ps1")
+const codegraphBundle = path.join(
+  rootDir,
+  "node_modules",
+  ".bun",
+  "node_modules",
+  "@colbymchenry",
+  `codegraph-${process.platform}-${process.arch}`,
+)
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
@@ -38,6 +46,11 @@ const getBase = (): Configuration => ({
       from: "native/",
       to: "native/",
       filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
+    },
+    {
+      from: codegraphBundle,
+      to: "codegraph/",
+      filter: ["node", "node.exe", "bin/**", "lib/**", "package.json"],
     },
   ],
   mac: {
