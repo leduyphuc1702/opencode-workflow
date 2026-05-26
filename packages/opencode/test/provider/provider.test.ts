@@ -217,6 +217,52 @@ it.instance(
 )
 
 it.instance(
+  "custom provider model accepts context-only limit and fixed reasoning variants",
+  Effect.gen(function* () {
+    const providers = yield* list
+    const model = providers[ProviderID.make("custom-provider")].models["custom-model"]
+    expect(model.limit.context).toBe(1000000)
+    expect(model.limit.output).toBe(0)
+    expect(model.capabilities.reasoning).toBe(true)
+    expect(model.options.reasoningEffort).toBe("xhigh")
+    expect(model.variants).toEqual({
+      low: { reasoningEffort: "low" },
+      medium: { reasoningEffort: "medium" },
+      high: { reasoningEffort: "high" },
+      xhigh: { reasoningEffort: "xhigh" },
+      max: { reasoningEffort: "max" },
+    })
+  }),
+  {
+    config: {
+      provider: {
+        "custom-provider": {
+          name: "Custom Provider",
+          npm: "@ai-sdk/openai-compatible",
+          api: "https://api.custom.com/v1",
+          models: {
+            "custom-model": {
+              name: "Custom Model",
+              reasoning: true,
+              options: { reasoningEffort: "xhigh" },
+              limit: { context: 1000000 },
+              variants: {
+                low: { reasoningEffort: "low" },
+                medium: { reasoningEffort: "medium" },
+                high: { reasoningEffort: "high" },
+                xhigh: { reasoningEffort: "xhigh" },
+                max: { reasoningEffort: "max" },
+              },
+            },
+          },
+          options: { apiKey: "custom-key" },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
   "filters alpha provider models by default",
   Effect.gen(function* () {
     const providers = yield* list

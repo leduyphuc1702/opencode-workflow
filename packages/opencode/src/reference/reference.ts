@@ -5,7 +5,6 @@ import { Global } from "@opencode-ai/core/global"
 import { Config } from "@/config/config"
 import { ConfigReference } from "@/config/reference"
 import { InstanceState } from "@/effect/instance-state"
-import { RuntimeFlags } from "@/effect/runtime-flags"
 import { parseRepositoryReference, repositoryCachePath, type RemoteReference } from "@/util/repository"
 import { RepositoryCache } from "./repository-cache"
 
@@ -124,8 +123,7 @@ const materializers = Effect.fn("Reference.materializers")(function* (
   )
 })
 
-function materializeAll(input: { flags: RuntimeFlags.Info; materializers: Materializer[] }) {
-  if (!input.flags.experimentalScout) return Effect.void
+function materializeAll(input: { materializers: Materializer[] }) {
   return Effect.forEach(
     input.materializers,
     Effect.fnUntraced(function* (item) {
@@ -186,7 +184,6 @@ export const layer = Layer.effect(
     const config = yield* Config.Service
     const cache = yield* RepositoryCache.Service
     const scope = yield* Scope.Scope
-    const flags = yield* RuntimeFlags.Service
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("Reference.state")(function* (ctx) {
@@ -197,7 +194,7 @@ export const layer = Layer.effect(
           worktree: ctx.worktree,
         })
         const materializeByPath = yield* materializers(cache, references)
-        const materializeAllCached = yield* Effect.cached(materializeAll({ flags, materializers: materializeByPath }))
+        const materializeAllCached = yield* Effect.cached(materializeAll({ materializers: materializeByPath }))
 
         return { references, materializeAll: materializeAllCached, materializeByPath }
       }),
@@ -205,7 +202,6 @@ export const layer = Layer.effect(
 
     return Service.of({
       init: Effect.fn("Reference.init")(function* () {
-        if (!flags.experimentalScout) return
         yield* InstanceState.useEffect(state, (s) => s.materializeAll).pipe(Effect.forkIn(scope), Effect.asVoid)
       }),
       list: Effect.fn("Reference.list")(function* () {
@@ -215,13 +211,11 @@ export const layer = Layer.effect(
         return yield* InstanceState.use(state, (s) => s.references.find((reference) => reference.name === name))
       }),
       ensure: Effect.fn("Reference.ensure")(function* (target?: string) {
-        if (!flags.experimentalScout) return
         const full = normalizedTarget(target)
         if (!full) return yield* InstanceState.useEffect(state, (s) => s.materializeAll)
         return yield* InstanceState.useEffect(state, (s) => materializeByPath(s.materializeByPath, full))
       }),
       contains: Effect.fn("Reference.contains")(function* (target?: string) {
-        if (!flags.experimentalScout) return false
         const full = normalizedTarget(target)
         if (!full) return false
         return yield* InstanceState.use(state, (s) => containsGitReferencePath(s.references, full))
@@ -233,7 +227,6 @@ export const layer = Layer.effect(
 export const defaultLayer = layer.pipe(
   Layer.provide(Config.defaultLayer),
   Layer.provide(RepositoryCache.defaultLayer),
-  Layer.provide(RuntimeFlags.defaultLayer),
 )
 
 export * as Reference from "./reference"

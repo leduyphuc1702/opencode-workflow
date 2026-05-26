@@ -25,7 +25,6 @@ const agentLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   )
 
 const it = testEffect(agentLayer())
-const scout = testEffect(agentLayer({ experimentalScout: true }))
 
 // Helper to evaluate permission for a tool with wildcard pattern
 function evalPerm(agent: Agent.Info | undefined, permission: string): Permission.Action | undefined {
@@ -55,7 +54,8 @@ it.instance("returns default native agents when no config", () =>
     expect(names).toContain("plan")
     expect(names).toContain("general")
     expect(names).toContain("explore")
-    expect(names).not.toContain("scout")
+    expect(names).toContain("scout")
+    expect(names).toContain("skillopt-agent")
     expect(names).toContain("compaction")
     expect(names).toContain("title")
     expect(names).toContain("summary")
@@ -109,14 +109,19 @@ it.instance("explore agent asks for external directories and allows whitelisted 
   }),
 )
 
-scout.instance("scout agent allows repo cloning and repo cache reads", () =>
+it.instance("scout agent allows read-only research tools and repo cache reads", () =>
   Effect.gen(function* () {
     const scout = yield* load((svc) => svc.get("scout"))
     expect(scout).toBeDefined()
     expect(scout?.mode).toBe("subagent")
     expect(evalPerm(scout, "repo_clone")).toBe("allow")
     expect(evalPerm(scout, "repo_overview")).toBe("allow")
+    expect(evalPerm(scout, "github_skill_search")).toBe("allow")
+    expect(evalPerm(scout, "websearch")).toBe("allow")
+    expect(evalPerm(scout, "read")).toBe("allow")
     expect(evalPerm(scout, "edit")).toBe("deny")
+    expect(evalPerm(scout, "write")).toBe("deny")
+    expect(evalPerm(scout, "bash")).toBe("deny")
     expect(
       Permission.evaluate(
         "external_directory",
@@ -127,7 +132,23 @@ scout.instance("scout agent allows repo cloning and repo cache reads", () =>
   }),
 )
 
-scout.instance(
+it.instance("skillopt agent is hidden, read-only, and cannot edit skills", () =>
+  Effect.gen(function* () {
+    const agent = yield* load((svc) => svc.get("skillopt-agent"))
+    expect(agent).toBeDefined()
+    expect(agent?.mode).toBe("subagent")
+    expect(agent?.hidden).toBe(true)
+    expect(evalPerm(agent, "read")).toBe("allow")
+    expect(evalPerm(agent, "grep")).toBe("allow")
+    expect(evalPerm(agent, "glob")).toBe("allow")
+    expect(evalPerm(agent, "edit")).toBe("deny")
+    expect(evalPerm(agent, "write")).toBe("deny")
+    expect(evalPerm(agent, "bash")).toBe("deny")
+    expect(evalPerm(agent, "task")).toBe("deny")
+  }),
+)
+
+it.instance(
   "reference config does not create subagents",
   () =>
     Effect.gen(function* () {
@@ -623,17 +644,17 @@ description: Permission skill.
   { git: true },
 )
 
-it.instance("defaultAgent returns build when no default_agent config", () =>
+it.instance("defaultAgent returns orchestrator-agent when no default_agent config", () =>
   Effect.gen(function* () {
     const agent = yield* load((svc) => svc.defaultAgent())
-    expect(agent).toBe("build")
+    expect(agent).toBe("orchestrator-agent")
   }),
 )
 
-it.instance("defaultInfo returns resolved build agent when no default_agent config", () =>
+it.instance("defaultInfo returns resolved orchestrator agent when no default_agent config", () =>
   Effect.gen(function* () {
     const agent = yield* load((svc) => svc.defaultInfo())
-    expect(agent.name).toBe("build")
+    expect(agent.name).toBe("orchestrator-agent")
     expect(agent.mode).toBe("primary")
   }),
 )
@@ -702,12 +723,11 @@ it.instance(
 )
 
 it.instance(
-  "defaultAgent returns plan when build is disabled and default_agent not set",
+  "defaultAgent returns orchestrator when build is disabled and default_agent not set",
   () =>
     Effect.gen(function* () {
       const agent = yield* load((svc) => svc.defaultAgent())
-      // build is disabled, so it should return plan (next primary agent)
-      expect(agent).toBe("plan")
+      expect(agent).toBe("orchestrator-agent")
     }),
   {
     config: {
@@ -726,6 +746,7 @@ it.instance(
       agent: {
         build: { disable: true },
         plan: { disable: true },
+        "orchestrator-agent": { disable: true },
       },
     },
   },

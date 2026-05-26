@@ -1,6 +1,14 @@
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
 const OPENAI_COMPATIBLE = "@ai-sdk/openai-compatible"
 
+export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
+export const CONTEXT_LIMITS = ["200000", "400000", "1000000", "2000000"] as const
+
+export type ReasoningEffort = "" | (typeof REASONING_EFFORTS)[number]
+export type ContextLimit = "" | (typeof CONTEXT_LIMITS)[number]
+
+const REASONING_VARIANTS = Object.fromEntries(REASONING_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
+
 type Translator = (key: string, vars?: Record<string, string | number | boolean>) => string
 
 export type ModelErr = {
@@ -17,6 +25,8 @@ export type ModelRow = {
   row: string
   id: string
   name: string
+  reasoningEffort: ReasoningEffort
+  contextLimit: ContextLimit
   err: ModelErr
 }
 
@@ -92,7 +102,25 @@ export function validateCustomProvider(input: ValidateArgs) {
     return { id: idError, name: nameError }
   })
   const modelsValid = models.every((m) => !m.id && !m.name)
-  const modelConfig = Object.fromEntries(input.form.models.map((m) => [m.id.trim(), { name: m.name.trim() }]))
+  const modelConfig = Object.fromEntries(
+    input.form.models.map((m) => {
+      const context = m.contextLimit ? Number(m.contextLimit) : undefined
+      return [
+        m.id.trim(),
+        {
+          name: m.name.trim(),
+          ...(m.reasoningEffort
+            ? {
+                reasoning: true,
+                options: { reasoningEffort: m.reasoningEffort },
+                variants: REASONING_VARIANTS,
+              }
+            : {}),
+          ...(context ? { limit: { context } } : {}),
+        },
+      ]
+    }),
+  )
 
   const seenHeaders = new Set<string>()
   const headers = input.form.headers.map((h) => {
@@ -154,5 +182,12 @@ let row = 0
 
 const nextRow = () => `row-${row++}`
 
-export const modelRow = (): ModelRow => ({ row: nextRow(), id: "", name: "", err: {} })
+export const modelRow = (): ModelRow => ({
+  row: nextRow(),
+  id: "",
+  name: "",
+  reasoningEffort: "",
+  contextLimit: "200000",
+  err: {},
+})
 export const headerRow = (): HeaderRow => ({ row: nextRow(), key: "", value: "", err: {} })

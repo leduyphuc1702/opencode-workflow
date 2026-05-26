@@ -1,0 +1,5 @@
+Search GitHub skills using the GitHub CLI `gh skill search` command.
+
+Use this for research workflows when you need to find existing public skills or production-style skill examples by keyword. Use `owner` to scope the search to a GitHub user or organization when the source should be constrained.
+
+The tool returns normalized results with the skill name, repository, path-derived URL, description, star count, and the raw JSON emitted by `gh` for traceability.

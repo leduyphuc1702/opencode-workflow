@@ -5,6 +5,7 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { useMutation } from "@tanstack/solid-query"
 import { TextField } from "@opencode-ai/ui/text-field"
+import { Select } from "@opencode-ai/ui/select"
 import { showToast } from "@opencode-ai/ui/toast"
 import { batch, For } from "solid-js"
 import { createStore, produce } from "solid-js/store"
@@ -12,7 +13,15 @@ import { Link } from "@/components/link"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
-import { type FormState, headerRow, modelRow, validateCustomProvider } from "./dialog-custom-provider-form"
+import {
+  CONTEXT_LIMITS,
+  REASONING_EFFORTS,
+  type FormState,
+  type ReasoningEffort,
+  headerRow,
+  modelRow,
+  validateCustomProvider,
+} from "./dialog-custom-provider-form"
 import { DialogSelectProvider } from "./dialog-select-provider"
 
 type Props = {
@@ -87,10 +96,10 @@ export function DialogCustomProvider(props: Props) {
     setForm("err", key, undefined)
   }
 
-  const setModel = (index: number, key: "id" | "name", value: string) => {
+  const setModel = (index: number, key: "id" | "name" | "reasoningEffort" | "contextLimit", value: string) => {
     batch(() => {
       setForm("models", index, key, value)
-      setForm("models", index, "err", key, undefined)
+      if (key === "id" || key === "name") setForm("models", index, "err", key, undefined)
     })
   }
 
@@ -161,6 +170,23 @@ export function DialogCustomProvider(props: Props) {
     saveMutation.mutate(result)
   }
 
+  const reasoningOptions = () => [
+    { value: "" as ReasoningEffort, label: language.t("provider.custom.models.reasoningEffort.none") },
+    ...REASONING_EFFORTS.map((effort) => ({ value: effort, label: effort })),
+  ]
+  const contextOptions = () =>
+    CONTEXT_LIMITS.map((limit) => ({
+      value: limit,
+      label: language.t(
+        {
+          "200000": "provider.custom.models.contextLimit.200000",
+          "400000": "provider.custom.models.contextLimit.400000",
+          "1000000": "provider.custom.models.contextLimit.1000000",
+          "2000000": "provider.custom.models.contextLimit.2000000",
+        }[limit],
+      ),
+    }))
+
   return (
     <Dialog
       title={
@@ -229,38 +255,66 @@ export function DialogCustomProvider(props: Props) {
             <label class="text-12-medium text-text-weak">{language.t("provider.custom.models.label")}</label>
             <For each={form.models}>
               {(m, i) => (
-                <div class="flex gap-2 items-start" data-row={m.row}>
-                  <div class="flex-1">
-                    <TextField
-                      label={language.t("provider.custom.models.id.label")}
-                      hideLabel
-                      placeholder={language.t("provider.custom.models.id.placeholder")}
-                      value={m.id}
-                      onChange={(v) => setModel(i(), "id", v)}
-                      validationState={m.err.id ? "invalid" : undefined}
-                      error={m.err.id}
+                <div class="flex flex-col gap-2" data-row={m.row}>
+                  <div class="flex gap-2 items-start">
+                    <div class="flex-1">
+                      <TextField
+                        label={language.t("provider.custom.models.id.label")}
+                        hideLabel
+                        placeholder={language.t("provider.custom.models.id.placeholder")}
+                        value={m.id}
+                        onChange={(v) => setModel(i(), "id", v)}
+                        validationState={m.err.id ? "invalid" : undefined}
+                        error={m.err.id}
+                      />
+                    </div>
+                    <div class="flex-1">
+                      <TextField
+                        label={language.t("provider.custom.models.name.label")}
+                        hideLabel
+                        placeholder={language.t("provider.custom.models.name.placeholder")}
+                        value={m.name}
+                        onChange={(v) => setModel(i(), "name", v)}
+                        validationState={m.err.name ? "invalid" : undefined}
+                        error={m.err.name}
+                      />
+                    </div>
+                    <IconButton
+                      type="button"
+                      icon="trash"
+                      variant="ghost"
+                      class="mt-1.5"
+                      onClick={() => removeModel(i())}
+                      disabled={form.models.length <= 1}
+                      aria-label={language.t("provider.custom.models.remove")}
                     />
                   </div>
-                  <div class="flex-1">
-                    <TextField
-                      label={language.t("provider.custom.models.name.label")}
-                      hideLabel
-                      placeholder={language.t("provider.custom.models.name.placeholder")}
-                      value={m.name}
-                      onChange={(v) => setModel(i(), "name", v)}
-                      validationState={m.err.name ? "invalid" : undefined}
-                      error={m.err.name}
+                  <div class="grid grid-cols-2 gap-2 pr-10">
+                    <Select
+                      options={reasoningOptions()}
+                      current={reasoningOptions().find((option) => option.value === m.reasoningEffort)}
+                      value={(option) => option.value}
+                      label={(option) => option.label}
+                      onSelect={(option) => setModel(i(), "reasoningEffort", option?.value ?? "")}
+                      placeholder={language.t("provider.custom.models.reasoningEffort.label")}
+                      variant="secondary"
+                      size="normal"
+                      triggerStyle={{ width: "100%", "justify-content": "space-between" }}
+                      triggerProps={{ "aria-label": language.t("provider.custom.models.reasoningEffort.label") }}
+                    />
+                    <Select
+                      options={contextOptions()}
+                      current={contextOptions().find((option) => option.value === m.contextLimit)}
+                      value={(option) => option.value}
+                      label={(option) => option.label}
+                      onSelect={(option) => setModel(i(), "contextLimit", option?.value ?? "")}
+                      placeholder={language.t("provider.custom.models.contextLimit.label")}
+                      variant="secondary"
+                      size="normal"
+                      triggerStyle={{ width: "100%", "justify-content": "space-between" }}
+                      triggerProps={{ "aria-label": language.t("provider.custom.models.contextLimit.label") }}
                     />
                   </div>
-                  <IconButton
-                    type="button"
-                    icon="trash"
-                    variant="ghost"
-                    class="mt-1.5"
-                    onClick={() => removeModel(i())}
-                    disabled={form.models.length <= 1}
-                    aria-label={language.t("provider.custom.models.remove")}
-                  />
                 </div>
               )}
             </For>

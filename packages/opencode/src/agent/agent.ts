@@ -17,6 +17,7 @@ import PROMPT_PLAN_AGENT_WORKFLOW from "./prompt/plan-agent-workflow.txt"
 import PROMPT_PLAN_FINALIZER_WORKFLOW from "./prompt/plan-finalizer-workflow.txt"
 import PROMPT_PLAN_REVIEWER_WORKFLOW from "./prompt/plan-reviewer-workflow.txt"
 import PROMPT_SCOUT from "./prompt/scout.txt"
+import PROMPT_SKILLOPT_AGENT from "./prompt/skillopt-agent.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { Permission } from "@/permission"
@@ -119,6 +120,7 @@ export const layer = Layer.effect(
           question: "deny",
           plan_enter: "deny",
           plan_exit: "deny",
+          github_skill_search: "deny",
           repo_clone: "deny",
           repo_overview: "deny",
           // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
@@ -405,36 +407,63 @@ export const layer = Layer.effect(
             mode: "subagent",
             native: true,
           },
-          ...(flags.experimentalScout
-            ? {
-                scout: {
-                  name: "scout",
-                  permission: Permission.merge(
-                    defaults,
-                    Permission.fromConfig({
-                      "*": "deny",
-                      grep: "allow",
-                      glob: "allow",
-                      webfetch: "allow",
-                      websearch: "allow",
-                      read: "allow",
-                      repo_clone: "allow",
-                      repo_overview: "allow",
-                      external_directory: {
-                        ...readonlyExternalDirectory,
-                        [path.join(Global.Path.repos, "*")]: "allow",
-                      },
-                    }),
-                    user,
-                  ),
-                  description: `Docs and dependency-source specialist. Use this when you need to inspect external documentation, clone dependency repositories into the managed cache, and research library implementation details without modifying the user's workspace.`,
-                  prompt: PROMPT_SCOUT,
-                  options: {},
-                  mode: "subagent" as const,
-                  native: true,
+          "skillopt-agent": {
+            name: "skillopt-agent",
+            description:
+              "Hidden read-only sub-agent that reviews completed skill usage and proposes permission-gated skill improvements.",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                task: "deny",
+                question: "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                codebase_status: "allow",
+                codebase_context: "allow",
+                codebase_search_symbol: "allow",
+                codebase_node: "allow",
+                codebase_trace: "allow",
+                codebase_explore: "allow",
+                workflow_state: "allow",
+                external_directory: readonlyExternalDirectory,
+              }),
+              user,
+            ),
+            prompt: PROMPT_SKILLOPT_AGENT,
+            options: {},
+            mode: "subagent",
+            hidden: true,
+            native: true,
+          },
+          scout: {
+            name: "scout",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                grep: "allow",
+                glob: "allow",
+                webfetch: "allow",
+                websearch: "allow",
+                github_skill_search: "allow",
+                read: "allow",
+                repo_clone: "allow",
+                repo_overview: "allow",
+                external_directory: {
+                  ...readonlyExternalDirectory,
+                  [path.join(Global.Path.repos, "*")]: "allow",
                 },
-              }
-            : {}),
+              }),
+              user,
+            ),
+            description: `Docs, API, skill, and dependency-source research specialist. Use this when you need current documentation, GitHub skill/API references, dependency repositories, or production implementation examples without modifying the user's workspace.`,
+            prompt: PROMPT_SCOUT,
+            options: {},
+            mode: "subagent" as const,
+            native: true,
+          },
           compaction: {
             name: "compaction",
             mode: "primary",

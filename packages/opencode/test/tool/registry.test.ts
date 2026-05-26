@@ -96,9 +96,6 @@ const brokenPluginLayer = Layer.succeed(
 )
 
 const it = testEffect(Layer.mergeAll(registryLayer(), node, Agent.defaultLayer))
-const scout = testEffect(
-  Layer.mergeAll(registryLayer({ flags: { experimentalScout: true } }), node, Agent.defaultLayer),
-)
 const background = testEffect(
   Layer.mergeAll(registryLayer({ flags: { experimentalBackgroundSubagents: true } }), node, Agent.defaultLayer),
 )
@@ -111,13 +108,14 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
-  it.instance("hides repo research tools unless experimental", () =>
+  it.instance("includes read-only research tools by default", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       const ids = yield* registry.ids()
 
-      expect(ids).not.toContain("repo_clone")
-      expect(ids).not.toContain("repo_overview")
+      expect(ids).toContain("github_skill_search")
+      expect(ids).toContain("repo_clone")
+      expect(ids).toContain("repo_overview")
     }),
   )
 
@@ -180,16 +178,6 @@ describe("tool.registry", () => {
           answer: { type: "string" },
         },
       })
-    }),
-  )
-
-  scout.instance("shows repo research tools when experimental scout is enabled", () =>
-    Effect.gen(function* () {
-      const registry = yield* ToolRegistry.Service
-      const ids = yield* registry.ids()
-
-      expect(ids).toContain("repo_clone")
-      expect(ids).toContain("repo_overview")
     }),
   )
 

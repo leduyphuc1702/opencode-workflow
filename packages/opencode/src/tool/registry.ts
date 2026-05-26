@@ -23,6 +23,7 @@ import { Plugin } from "../plugin"
 import { Provider } from "@/provider/provider"
 import { ProviderID, type ModelID } from "../provider/schema"
 import { WebSearchTool } from "./websearch"
+import { GithubSkillSearchTool } from "./github_skill_search"
 import { RepoCloneTool } from "./repo_clone"
 import { RepoOverviewTool } from "./repo_overview"
 import { RepositoryCache } from "@/reference/repository-cache"
@@ -153,6 +154,7 @@ const baseLayer: Layer.Layer<
     const plan = yield* PlanExitTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
+    const githubSkillSearch = yield* GithubSkillSearchTool
     const repoClone = yield* RepoCloneTool
     const repoOverview = yield* RepoOverviewTool
     const shell = yield* ShellTool
@@ -280,6 +282,7 @@ const baseLayer: Layer.Layer<
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
           search: Tool.init(websearch),
+          github_skill_search: Tool.init(githubSkillSearch),
           repo_clone: Tool.init(repoClone),
           repo_overview: Tool.init(repoOverview),
           skill: Tool.init(skilltool),
@@ -320,7 +323,9 @@ const baseLayer: Layer.Layer<
             tool.fetch,
             tool.todo,
             tool.search,
-            ...(flags.experimentalScout ? [tool.repo_clone, tool.repo_overview] : []),
+            tool.github_skill_search,
+            tool.repo_clone,
+            tool.repo_overview,
             tool.skill,
             tool.codebase_status,
             tool.codebase_files,

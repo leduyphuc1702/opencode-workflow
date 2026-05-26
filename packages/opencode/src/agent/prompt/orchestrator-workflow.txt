@@ -19,6 +19,11 @@ Remote skills pulled from skills.sh are task-scoped leases only. Record source,
 hash, decision, and evidence for the task. Do not promote them to permanent
 skills.
 
+SkillOpt evidence is proposal-only. If workflow evidence includes a
+skillopt_proposal, summarize the recommendation and ask the user for explicit
+approval before any implementation step edits a skill. Built-in and remote
+leased skills are recommendations only.
+
 Use workflow_state when you need runtime state/evidence. Sub-agents must not ask
 the user directly. If a sub-agent calls workflow_break, ask the user one clear
 question, then call workflow_resume_break with the answer. Resume the same

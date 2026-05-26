@@ -6,7 +6,6 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Global } from "@opencode-ai/core/global"
 import { Config } from "../../src/config/config"
 import { ConfigReference } from "../../src/config/reference"
-import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { Git } from "../../src/git"
 import { Reference } from "../../src/reference/reference"
 import { RepositoryCache } from "../../src/reference/repository-cache"
@@ -17,23 +16,14 @@ afterEach(async () => {
   await disposeAllInstances()
 })
 
-const referenceLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
+const referenceLayer = () =>
   Reference.layer.pipe(
     Layer.provide(Config.defaultLayer),
     Layer.provide(RepositoryCache.defaultLayer),
-    Layer.provide(RuntimeFlags.layer(flags)),
   )
 
 const it = testEffect(
   Layer.mergeAll(AppFileSystem.defaultLayer, CrossSpawnSpawner.defaultLayer, Git.defaultLayer, referenceLayer()),
-)
-const scout = testEffect(
-  Layer.mergeAll(
-    AppFileSystem.defaultLayer,
-    CrossSpawnSpawner.defaultLayer,
-    Git.defaultLayer,
-    referenceLayer({ experimentalScout: true }),
-  ),
 )
 
 const githubBase = <A, E, R>(url: string, self: Effect.Effect<A, E, R>) =>
@@ -197,7 +187,7 @@ describe("reference", () => {
     }),
   )
 
-  scout.live("materializes configured git references during init", () =>
+  it.live("materializes configured git references during init", () =>
     provideTmpdirInstance(
       (_dir) =>
         Effect.gen(function* () {
@@ -243,7 +233,7 @@ describe("reference", () => {
     ),
   )
 
-  scout.live("refreshes configured git references on new instance init", () =>
+  it.live("refreshes configured git references on new instance init", () =>
     Effect.gen(function* () {
       const fs = yield* AppFileSystem.Service
       const cache = path.join(Global.Path.repos, "github.com", "opencode-reference-refresh", "repo")

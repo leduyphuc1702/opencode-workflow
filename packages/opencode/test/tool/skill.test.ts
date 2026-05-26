@@ -38,10 +38,7 @@ describe("tool.skill", () => {
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {
         const skill = path.join(dir, ".opencode", "skill", "tool-skill")
-        yield* Effect.promise(() =>
-          Bun.write(
-            path.join(skill, "SKILL.md"),
-            `---
+        const content = `---
 name: tool-skill
 description: Skill for tool tests.
 ---
@@ -49,7 +46,11 @@ description: Skill for tool tests.
 # Tool Skill
 
 Use this skill.
-`,
+`
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(skill, "SKILL.md"),
+            content,
           ),
         )
         yield* Effect.promise(() => Bun.write(path.join(skill, "scripts", "demo.txt"), "demo"))
@@ -81,6 +82,13 @@ Use this skill.
         }
 
         const result = yield* tool.execute({ name: "tool-skill" }, ctx)
+        const evidence = yield* WorkflowEvidence.Service
+        const event = (yield* evidence.list(ctx.sessionID)).find((event) => event.type === "skillopt_proposal")
+        if (!event || typeof event.data !== "object" || event.data === null) {
+          throw new Error("missing SkillOpt proposal evidence")
+        }
+        const data = event.data as Record<string, unknown>
+        const validation = data.validation as Record<string, unknown>
         const file = path.resolve(skill, "scripts", "demo.txt")
 
         expect(requests.length).toBe(1)
@@ -88,9 +96,18 @@ Use this skill.
         expect(requests[0].patterns).toContain("tool-skill")
         expect(requests[0].always).toContain("tool-skill")
         expect(result.metadata.dir).toBe(skill)
+        expect(result.output).toContain(`<skillopt_review evidence="${event.id}"`)
         expect(result.output).toContain(`<skill_content name="tool-skill">`)
         expect(result.output).toContain(`Base directory for this skill: ${pathToFileURL(skill).href}`)
         expect(result.output).toContain(`<file>${file}</file>`)
+        expect(data.skillName).toBe("tool-skill")
+        expect(data.skillPath).toBe(path.join(skill, "SKILL.md"))
+        expect(data.originalHash).toBe(createHash("sha256").update(content).digest("hex"))
+        expect(data.status).toBe("proposal")
+        expect(data.applyablePatch).toBe(false)
+        expect(Array.isArray(data.candidates) ? data.candidates.length : 0).toBe(3)
+        expect(validation.passed).toBe(false)
+        expect(validation.requiredScore).toBe(1.2)
       }),
     ),
   )
@@ -183,10 +200,15 @@ Use this skill.
             const result = yield* tool.execute({ name }, ctx)
             const evidence = yield* WorkflowEvidence.Service
             const event = (yield* evidence.list(ctx.sessionID)).find((event) => event.type === "skill_lease")
+            const skillopt = (yield* evidence.list(ctx.sessionID)).find((event) => event.type === "skillopt_proposal")
             if (!event || typeof event.data !== "object" || event.data === null) {
               throw new Error("missing skill lease evidence")
             }
+            if (!skillopt || typeof skillopt.data !== "object" || skillopt.data === null) {
+              throw new Error("missing remote SkillOpt proposal evidence")
+            }
             const data = event.data as Record<string, unknown>
+            const skilloptData = skillopt.data as Record<string, unknown>
             const sourceUrl = new URL(`${name}/`, base).href
             const rawContentUrl = new URL("SKILL.md", sourceUrl).href
             const contentSha256 = createHash("sha256").update(content).digest("hex")
@@ -204,6 +226,8 @@ Use this skill.
             expect(data.installStatus).toBe("not_installed")
             expect(data.persistStatus).toBe("not_persisted")
             expect(data.decision).toBe("lease_for_current_task_only")
+            expect(skilloptData.source).toBe("remote")
+            expect(skilloptData.applyablePatch).toBe(false)
           }),
         { config: { skills: { urls: [base] } } },
       )

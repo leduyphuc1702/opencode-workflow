@@ -1558,6 +1558,7 @@ function toToolKind(toolName: string): ToolKind {
 
     case "grep":
     case "glob":
+    case "github_skill_search":
     case "repo_clone":
     case "repo_overview":
     case "context7_resolve_library_id":

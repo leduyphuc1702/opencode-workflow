@@ -1063,7 +1063,7 @@ export type ProviderConfig = {
       }
       limit?: {
         context: number
-        output: number
+        output?: number
       }
       modalities?: {
         input: Array<"text" | "audio" | "image" | "video" | "pdf">

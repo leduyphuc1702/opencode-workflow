@@ -38,7 +38,9 @@ export const SkillTool = Tool.define(
 
           const dir = path.dirname(info.location)
           const base = pathToFileURL(dir).href
-          const lease = yield* recordRemoteLease(evidence, ctx, info, yield* skill.remoteSource(info.name))
+          const source = yield* skill.remoteSource(info.name)
+          const lease = yield* recordRemoteLease(evidence, ctx, info, source)
+          const skillopt = yield* recordSkillOptProposal(evidence, ctx, info)
           const limit = 10
           const files = yield* rg.files({ cwd: dir, follow: false, hidden: true, signal: ctx.abort }).pipe(
             Stream.filter((file) => !file.includes("SKILL.md")),
@@ -55,6 +57,13 @@ export const SkillTool = Tool.define(
                 ? [
                     `<task_scoped_remote_skill_lease evidence="${lease.evidenceID}" hash="${lease.hash}" />`,
                     "This remote skill is leased only for the current task and is not promoted into the long-lived skill registry.",
+                    "",
+                  ]
+                : []),
+              ...(skillopt
+                ? [
+                    `<skillopt_review evidence="${skillopt.evidenceID}" status="proposal" hash="${skillopt.hash}" />`,
+                    "SkillOpt review is proposal-only; no skill file will be edited unless the user approves a follow-up implementation.",
                     "",
                   ]
                 : []),
@@ -76,6 +85,7 @@ export const SkillTool = Tool.define(
               name: info.name,
               dir,
               ...(lease ? { lease } : {}),
+              ...(skillopt ? { skillopt } : {}),
             },
           }
         }).pipe(Effect.orDie),
@@ -125,4 +135,96 @@ function recordRemoteLease(
       rawContentUrl: source?.rawContentUrl ?? "unknown",
     }
   })
+}
+
+function recordSkillOptProposal(evidence: Option.Option<WorkflowEvidence.Interface>, ctx: Tool.Context, info: Skill.Info) {
+  return Effect.gen(function* () {
+    if (Option.isNone(evidence)) return
+    const rawContent = yield* skillContent(info)
+    const originalHash = createHash("sha256").update(rawContent).digest("hex")
+    const candidates = skillOptCandidates()
+    const selectedCandidate = candidates.toSorted((a, b) => b.score - a.score)[0]
+    const event = yield* evidence.value
+      .append({
+        sessionID: ctx.sessionID,
+        type: "skillopt_proposal",
+        summary: `SkillOpt proposal queued: ${info.name}`,
+        data: {
+          skillName: info.name,
+          skillPath: info.location,
+          originalHash,
+          source: info.source ?? "local",
+          userRequest: lastUserRequest(ctx.messages),
+          trajectory: {
+            agent: ctx.agent,
+            messageID: ctx.messageID,
+            callID: ctx.callID,
+            loadedSkill: info.name,
+          },
+          candidates,
+          selectedCandidate,
+          validation: {
+            baselineScore: 1,
+            candidateScore: selectedCandidate?.score ?? 0,
+            requiredScore: 1.2,
+            passed: false,
+            reason: "Independent replay validation has not exceeded the original skill by 20% yet.",
+          },
+          status: "proposal",
+          applyablePatch: false,
+        },
+      })
+      .pipe(Effect.orElseSucceed(() => undefined))
+    if (!event) return
+    return {
+      evidenceID: event.id,
+      hash: originalHash,
+      originalHash,
+      applyablePatch: false,
+      source: info.source ?? "local",
+    }
+  })
+}
+
+function skillContent(info: Skill.Info) {
+  return Effect.tryPromise(() => Bun.file(info.location).text()).pipe(Effect.orElseSucceed(() => info.content))
+}
+
+function skillOptCandidates() {
+  return [
+    {
+      id: "add-codebase-signals",
+      kind: "add",
+      title: "Add codebase-specific signals observed during this skill usage",
+      rationale: "Capture concrete paths, commands, verification signals, and failure modes from the latest trajectory.",
+      score: 1,
+      applyablePatch: false,
+    },
+    {
+      id: "edit-ambiguous-steps",
+      kind: "edit",
+      title: "Tighten ambiguous instructions that caused extra exploration",
+      rationale: "Rewrite broad guidance into explicit decision points and stop conditions for similar tasks.",
+      score: 0.95,
+      applyablePatch: false,
+    },
+    {
+      id: "replace-stale-reference",
+      kind: "replace",
+      title: "Replace stale or generic references with verified project-local references",
+      rationale: "Prefer evidence from the current codebase over generic examples when the skill is reused here.",
+      score: 0.9,
+      applyablePatch: false,
+    },
+  ]
+}
+
+function lastUserRequest(messages: Tool.Context["messages"]) {
+  return messages
+    .toReversed()
+    .find((message) => message.info.role === "user")
+    ?.parts.flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("\n")
+    .trim()
+    .slice(0, 4000)
 }

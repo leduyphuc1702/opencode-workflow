@@ -59,6 +59,7 @@ export const EvidenceEvent = Schema.Struct({
     "impact",
     "test",
     "skill_lease",
+    "skillopt_proposal",
   ]),
   timestamp: Schema.String,
   summary: Schema.String,

@@ -11,7 +11,9 @@ describe("validateCustomProvider", () => {
         name: " Custom Provider ",
         baseURL: "https://api.example.com ",
         apiKey: " {env: CUSTOM_PROVIDER_KEY} ",
-        models: [{ row: "m0", id: " model-a ", name: " Model A ", err: {} }],
+        models: [
+          { row: "m0", id: " model-a ", name: " Model A ", reasoningEffort: "", contextLimit: "200000", err: {} },
+        ],
         headers: [
           { row: "h0", key: " X-Test ", value: " enabled ", err: {} },
           { row: "h1", key: "", value: "", err: {} },
@@ -38,9 +40,49 @@ describe("validateCustomProvider", () => {
           },
         },
         models: {
-          "model-a": { name: "Model A" },
+          "model-a": { name: "Model A", limit: { context: 200000 } },
         },
       },
+    })
+  })
+
+  test("builds reasoning and context presets for custom models", () => {
+    const result = validateCustomProvider({
+      form: {
+        providerID: "custom-provider",
+        name: "Custom Provider",
+        baseURL: "https://api.example.com",
+        apiKey: "secret",
+        models: [
+          {
+            row: "m0",
+            id: "model-a",
+            name: "Model A",
+            reasoningEffort: "xhigh",
+            contextLimit: "1000000",
+            err: {},
+          },
+        ],
+        headers: [{ row: "h0", key: "", value: "", err: {} }],
+        err: {},
+      },
+      t,
+      disabledProviders: [],
+      existingProviderIDs: new Set(),
+    })
+
+    expect(result.result?.config.models["model-a"]).toEqual({
+      name: "Model A",
+      reasoning: true,
+      options: { reasoningEffort: "xhigh" },
+      variants: {
+        low: { reasoningEffort: "low" },
+        medium: { reasoningEffort: "medium" },
+        high: { reasoningEffort: "high" },
+        xhigh: { reasoningEffort: "xhigh" },
+        max: { reasoningEffort: "max" },
+      },
+      limit: { context: 1000000 },
     })
   })
 
@@ -52,8 +94,8 @@ describe("validateCustomProvider", () => {
         baseURL: "https://api.example.com",
         apiKey: "secret",
         models: [
-          { row: "m0", id: "model-a", name: "Model A", err: {} },
-          { row: "m1", id: "model-a", name: "Model A 2", err: {} },
+          { row: "m0", id: "model-a", name: "Model A", reasoningEffort: "", contextLimit: "200000", err: {} },
+          { row: "m1", id: "model-a", name: "Model A 2", reasoningEffort: "", contextLimit: "200000", err: {} },
         ],
         headers: [
           { row: "h0", key: "Authorization", value: "one", err: {} },

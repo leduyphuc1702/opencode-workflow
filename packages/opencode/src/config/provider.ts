@@ -39,7 +39,7 @@ export const Model = Schema.Struct({
     Schema.Struct({
       context: Schema.Finite,
       input: Schema.optional(Schema.Finite),
-      output: Schema.Finite,
+      output: Schema.optional(Schema.Finite),
     }),
   ),
   modalities: Schema.optional(
