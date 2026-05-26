@@ -119,6 +119,74 @@
     width: 100%;
   }
 
+  [data-component="select"].custom-provider-model-select,
+  [data-slot="select-select-trigger"].custom-provider-model-select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  [data-component="select"].custom-provider-model-select [data-slot="select-select-trigger"],
+  [data-slot="select-select-trigger"].custom-provider-model-select {
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+    box-sizing: border-box;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 8px 2px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-weak-base);
+    background: var(--input-base);
+    box-shadow: none;
+  }
+
+  [data-component="select"].custom-provider-model-select [data-slot="select-select-trigger"]:hover:not(:disabled),
+  [data-slot="select-select-trigger"].custom-provider-model-select:hover:not(:disabled),
+  [data-component="select"].custom-provider-model-select [data-slot="select-select-trigger"][data-expanded],
+  [data-slot="select-select-trigger"].custom-provider-model-select[data-expanded],
+  [data-component="select"].custom-provider-model-select
+    [data-slot="select-select-trigger"][data-expanded]:hover:not(:disabled),
+  [data-slot="select-select-trigger"].custom-provider-model-select[data-expanded]:hover:not(:disabled) {
+    background: var(--input-base);
+    border-color: var(--border-weak-base);
+  }
+
+  [data-component="select"].custom-provider-model-select
+    [data-slot="select-select-trigger"]:focus-visible:not(:disabled),
+  [data-slot="select-select-trigger"].custom-provider-model-select:focus-visible:not(:disabled),
+  [data-component="select"].custom-provider-model-select [data-slot="select-select-trigger"][data-expanded],
+  [data-slot="select-select-trigger"].custom-provider-model-select[data-expanded] {
+    border-color: transparent;
+    box-shadow:
+      0 0 0 3px var(--border-weak-selected),
+      0 0 0 1px var(--border-selected),
+      0 1px 2px -1px rgba(19, 16, 16, 0.25),
+      0 1px 2px 0 rgba(19, 16, 16, 0.08),
+      0 1px 3px 0 rgba(19, 16, 16, 0.12);
+  }
+
+  [data-component="select"].custom-provider-model-select [data-slot="select-select-trigger-value"],
+  [data-slot="select-select-trigger"].custom-provider-model-select [data-slot="select-select-trigger-value"] {
+    min-width: 0;
+    color: var(--text-strong);
+    font-family: var(--font-family-sans);
+    font-size: 14px;
+    font-style: normal;
+    font-weight: var(--font-weight-regular);
+    line-height: var(--line-height-large);
+    letter-spacing: var(--letter-spacing-normal);
+  }
+
+  [data-component="select-content"].custom-provider-model-select {
+    min-width: var(--kb-popper-anchor-width, 104px);
+  }
+
+  [data-component="select-content"].custom-provider-model-select [data-slot="select-select-item"] {
+    font-size: 14px;
+    font-weight: var(--font-weight-regular);
+    line-height: var(--line-height-large);
+  }
+
   @container getting-started (min-width: 17rem) {
     [data-component="getting-started-actions"] {
       flex-direction: row;

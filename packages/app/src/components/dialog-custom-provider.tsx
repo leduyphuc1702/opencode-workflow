@@ -289,31 +289,34 @@ export function DialogCustomProvider(props: Props) {
                       aria-label={language.t("provider.custom.models.remove")}
                     />
                   </div>
-                  <div class="grid grid-cols-2 gap-2 pr-10">
-                    <Select
-                      options={reasoningOptions()}
-                      current={reasoningOptions().find((option) => option.value === m.reasoningEffort)}
-                      value={(option) => option.value}
-                      label={(option) => option.label}
-                      onSelect={(option) => setModel(i(), "reasoningEffort", option?.value ?? "")}
-                      placeholder={language.t("provider.custom.models.reasoningEffort.label")}
-                      variant="secondary"
-                      size="normal"
-                      triggerStyle={{ width: "100%", "justify-content": "space-between" }}
-                      triggerProps={{ "aria-label": language.t("provider.custom.models.reasoningEffort.label") }}
-                    />
-                    <Select
-                      options={contextOptions()}
-                      current={contextOptions().find((option) => option.value === m.contextLimit)}
-                      value={(option) => option.value}
-                      label={(option) => option.label}
-                      onSelect={(option) => setModel(i(), "contextLimit", option?.value ?? "")}
-                      placeholder={language.t("provider.custom.models.contextLimit.label")}
-                      variant="secondary"
-                      size="normal"
-                      triggerStyle={{ width: "100%", "justify-content": "space-between" }}
-                      triggerProps={{ "aria-label": language.t("provider.custom.models.contextLimit.label") }}
-                    />
+                  <div class="flex gap-2 items-start">
+                    <div class="grid grid-cols-2 gap-2 flex-1">
+                      <Select
+                        class="custom-provider-model-select"
+                        options={reasoningOptions()}
+                        current={reasoningOptions().find((option) => option.value === m.reasoningEffort)}
+                        value={(option) => option.value}
+                        label={(option) => option.label}
+                        onSelect={(option) => setModel(i(), "reasoningEffort", option?.value ?? "")}
+                        placeholder={language.t("provider.custom.models.reasoningEffort.none")}
+                        variant="secondary"
+                        size="large"
+                        triggerProps={{ "aria-label": language.t("provider.custom.models.reasoningEffort.label") }}
+                      />
+                      <Select
+                        class="custom-provider-model-select"
+                        options={contextOptions()}
+                        current={contextOptions().find((option) => option.value === m.contextLimit)}
+                        value={(option) => option.value}
+                        label={(option) => option.label}
+                        onSelect={(option) => setModel(i(), "contextLimit", option?.value ?? "")}
+                        placeholder={language.t("provider.custom.models.contextLimit.label")}
+                        variant="secondary"
+                        size="large"
+                        triggerProps={{ "aria-label": language.t("provider.custom.models.contextLimit.label") }}
+                      />
+                    </div>
+                    <div class="w-6 shrink-0" aria-hidden="true" />
                   </div>
                 </div>
               )}
