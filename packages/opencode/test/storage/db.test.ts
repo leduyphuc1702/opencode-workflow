@@ -1,10 +1,13 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, it as bunIt } from "bun:test"
 import path from "path"
+import { mkdtemp, rm } from "fs/promises"
+import os from "os"
 import { Effect } from "effect"
 import { Global } from "@opencode-ai/core/global"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@/storage/db"
+import { init } from "#db"
 import { it } from "../lib/effect"
 
 describe("Database.getChannelPath", () => {
@@ -35,4 +38,22 @@ describe("Database.getChannelPath", () => {
       expect(Database.getChannelPath(flags)).toBe(Database.getChannelPath({ disableChannelDb: flags.disableChannelDb }))
     }).pipe(Effect.provide(RuntimeFlags.layer({ skipMigrations: true }))),
   )
+
+  bunIt("creates parent directories for file-backed databases before enabling WAL", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "opencode-db-init-"))
+    const dbPath = path.join(root, "missing", "nested", "opencode.db")
+
+    try {
+      const db = init(dbPath)
+      try {
+        db.run("PRAGMA journal_mode = WAL")
+
+        expect(await Bun.file(dbPath).exists()).toBe(true)
+      } finally {
+        db.$client.close()
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })
