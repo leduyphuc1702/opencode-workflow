@@ -38,7 +38,7 @@ export const SkillTool = Tool.define(
 
           const dir = path.dirname(info.location)
           const base = pathToFileURL(dir).href
-          const lease = yield* recordRemoteLease(evidence, ctx, info)
+          const lease = yield* recordRemoteLease(evidence, ctx, info, yield* skill.remoteSource(info.name))
           const limit = 10
           const files = yield* rg.files({ cwd: dir, follow: false, hidden: true, signal: ctx.abort }).pipe(
             Stream.filter((file) => !file.includes("SKILL.md")),
@@ -83,11 +83,19 @@ export const SkillTool = Tool.define(
   }),
 )
 
-function recordRemoteLease(evidence: Option.Option<WorkflowEvidence.Interface>, ctx: Tool.Context, info: Skill.Info) {
+function recordRemoteLease(
+  evidence: Option.Option<WorkflowEvidence.Interface>,
+  ctx: Tool.Context,
+  info: Skill.Info,
+  source: Skill.RemoteSkillSource | undefined,
+) {
   return Effect.gen(function* () {
     if (info.source !== "remote") return
     if (Option.isNone(evidence)) return
-    const hash = createHash("sha256").update(info.content).digest("hex")
+    const rawContent = yield* Effect.tryPromise(() => Bun.file(info.location).text()).pipe(
+      Effect.orElseSucceed(() => info.content),
+    )
+    const contentSha256 = createHash("sha256").update(rawContent).digest("hex")
     const event = yield* evidence.value
       .append({
         sessionID: ctx.sessionID,
@@ -95,13 +103,26 @@ function recordRemoteLease(evidence: Option.Option<WorkflowEvidence.Interface>, 
         summary: `Task-scoped remote skill lease: ${info.name}`,
         data: {
           name: info.name,
+          sourceUrl: source?.sourceUrl ?? "unknown",
+          rawContentUrl: source?.rawContentUrl ?? "unknown",
           location: info.location,
-          hash,
+          contentSha256,
+          hash: contentSha256,
           decision: "lease_for_current_task_only",
+          installStatus: "not_installed",
+          persistStatus: "not_persisted",
+          rationale: "Remote skill content is loaded for this task only and is not installed or promoted.",
         },
       })
       .pipe(Effect.orElseSucceed(() => undefined))
     if (!event) return
-    return { evidenceID: event.id, hash, location: info.location }
+    return {
+      evidenceID: event.id,
+      hash: contentSha256,
+      contentSha256,
+      location: info.location,
+      sourceUrl: source?.sourceUrl ?? "unknown",
+      rawContentUrl: source?.rawContentUrl ?? "unknown",
+    }
   })
 }

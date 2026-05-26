@@ -97,6 +97,21 @@ function stubOps(opts?: { onPrompt?: (input: SessionPrompt.PromptInput) => void;
 }
 
 function reply(input: SessionPrompt.PromptInput, text: string): MessageV2.WithParts {
+  return replyWithParts(input, (id) => [
+    {
+      id: PartID.ascending(),
+      messageID: id,
+      sessionID: input.sessionID,
+      type: "text",
+      text,
+    },
+  ])
+}
+
+function replyWithParts(
+  input: SessionPrompt.PromptInput,
+  parts: (id: MessageID) => MessageV2.WithParts["parts"],
+): MessageV2.WithParts {
   const id = MessageID.ascending()
   return {
     info: {
@@ -114,15 +129,7 @@ function reply(input: SessionPrompt.PromptInput, text: string): MessageV2.WithPa
       time: { created: Date.now() },
       finish: "stop",
     },
-    parts: [
-      {
-        id: PartID.ascending(),
-        messageID: id,
-        sessionID: input.sessionID,
-        type: "text",
-        text,
-      },
-    ],
+    parts: parts(id),
   }
 }
 
@@ -239,6 +246,89 @@ describe("tool.task", () => {
       expect(result.metadata.sessionId).toBe(child.id)
       expect(result.output).toContain(`task_id: ${child.id}`)
       expect(seen?.sessionID).toBe(child.id)
+    }),
+  )
+
+  it.instance("execute returns workflow break output when subagent has no text part", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const breakOutput = JSON.stringify(
+        {
+          breakRequest: {
+            id: "brk_test",
+            agent: "plan-reviewer",
+            taskSlice: "Review the PlanDraft artifact",
+            reason: "PlanDraft artifact is missing.",
+            question: "Provide the PlanDraft artifact for review.",
+            evidenceIds: ["evd_plan"],
+          },
+          checkpoint: {
+            breakRequestId: "brk_test",
+            sessionId: chat.id,
+            subagentSessionId: "ses_plan_reviewer",
+            workflowState: "plan_review",
+            taskBrief: "Review the PlanDraft artifact",
+            evidenceIds: ["evd_plan"],
+            compactedContext: "Reviewer cannot continue without the artifact.",
+          },
+          evidenceID: "evd_break",
+          orchestratorInstruction:
+            "Ask the user this question, then call workflow_resume_break with the answer before resuming the same sub-agent via task_id.",
+        },
+        null,
+        2,
+      )
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.succeed(
+            replyWithParts(input, (id) => [
+              {
+                id: PartID.ascending(),
+                messageID: id,
+                sessionID: input.sessionID,
+                type: "tool",
+                callID: "call_workflow_break",
+                tool: "workflow_break",
+                state: {
+                  status: "completed",
+                  input: {},
+                  output: breakOutput,
+                  title: "BreakRequest brk_test",
+                  metadata: { breakRequestID: "brk_test" },
+                  time: { start: Date.now(), end: Date.now() },
+                },
+              },
+            ]),
+          ),
+        loop: (input) => Effect.succeed(reply({ sessionID: input.sessionID, parts: [] }, "done")),
+      }
+
+      const result = yield* def.execute(
+        {
+          description: "review plan",
+          prompt: "review the generated PlanDraft",
+          subagent_type: "general",
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(result.output).toContain(`task_id: ${result.metadata.sessionId}`)
+      expect(result.output).toContain("<task_result>")
+      expect(result.output).toContain("BreakRequest brk_test")
+      expect(result.output).toContain("workflow_resume_break")
     }),
   )
 

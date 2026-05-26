@@ -86,19 +86,24 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Ski
 type State = {
   skills: Record<string, Info>
   dirs: Set<string>
+  remoteSources: Record<string, RemoteSkillSource>
 }
 
 type DiscoveryState = {
   matches: string[]
   dirs: string[]
   remoteDirs: string[]
+  remoteSources: Record<string, RemoteSkillSource>
 }
 
 type ScanState = {
   matches: Set<string>
   dirs: Set<string>
   remoteDirs: Set<string>
+  remoteSources: Record<string, RemoteSkillSource>
 }
+
+export type RemoteSkillSource = Pick<Discovery.PulledSkill, "sourceUrl" | "rawContentUrl">
 
 export interface Interface {
   readonly get: (name: string) => Effect.Effect<Info | undefined>
@@ -106,9 +111,16 @@ export interface Interface {
   readonly all: () => Effect.Effect<Info[]>
   readonly dirs: () => Effect.Effect<string[]>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
+  readonly remoteSource: (name: string) => Effect.Effect<RemoteSkillSource | undefined>
 }
 
-const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.Interface, source: Info["source"]) {
+const add = Effect.fnUntraced(function* (
+  state: State,
+  match: string,
+  bus: Bus.Interface,
+  source: Info["source"],
+  sourceInfo?: RemoteSkillSource,
+) {
   const md = yield* Effect.tryPromise({
     try: () => ConfigMarkdown.parse(match),
     catch: (err) => err,
@@ -146,6 +158,11 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
     content: md.content,
     source,
   }
+  if (sourceInfo) {
+    state.remoteSources[md.data.name] = sourceInfo
+    return
+  }
+  delete state.remoteSources[md.data.name]
 })
 
 const scan = Effect.fnUntraced(function* (
@@ -188,7 +205,7 @@ const discoverSkills = Effect.fnUntraced(function* (
   directory: string,
   worktree: string,
 ) {
-  const state: ScanState = { matches: new Set(), dirs: new Set(), remoteDirs: new Set() }
+  const state: ScanState = { matches: new Set(), dirs: new Set(), remoteDirs: new Set(), remoteSources: {} }
 
   const externalDirs: string[] = []
   if (!disableExternalSkills) {
@@ -229,9 +246,10 @@ const discoverSkills = Effect.fnUntraced(function* (
 
   for (const url of cfg.skills?.urls ?? []) {
     const pulledDirs = yield* discovery.pull(url)
-    for (const dir of pulledDirs) {
-      state.remoteDirs.add(dir)
-      yield* scan(state, dir, SKILL_PATTERN)
+    for (const skill of pulledDirs) {
+      state.remoteDirs.add(skill.dir)
+      state.remoteSources[skill.dir] = { sourceUrl: skill.sourceUrl, rawContentUrl: skill.rawContentUrl }
+      yield* scan(state, skill.dir, SKILL_PATTERN)
     }
   }
 
@@ -239,14 +257,19 @@ const discoverSkills = Effect.fnUntraced(function* (
     matches: Array.from(state.matches),
     dirs: Array.from(state.dirs),
     remoteDirs: Array.from(state.remoteDirs),
+    remoteSources: state.remoteSources,
   }
 })
 
 const loadSkills = Effect.fnUntraced(function* (state: State, discovered: DiscoveryState, bus: Bus.Interface) {
-  yield* Effect.forEach(discovered.matches, (match) => add(state, match, bus, remoteSource(discovered, match)), {
-    concurrency: "unbounded",
-    discard: true,
-  })
+  yield* Effect.forEach(
+    discovered.matches,
+    (match) => add(state, match, bus, remoteSource(discovered, match), remoteSkillSource(discovered, match)),
+    {
+      concurrency: "unbounded",
+      discard: true,
+    },
+  )
 
   log.info("init", { count: Object.keys(state.skills).length })
 })
@@ -278,7 +301,7 @@ export const layer = Layer.effect(
     )
     const state = yield* InstanceState.make(
       Effect.fn("Skill.state")(function* () {
-        const s: State = { skills: {}, dirs: new Set() }
+        const s: State = { skills: {}, dirs: new Set(), remoteSources: {} }
         // Register the built-in skill BEFORE disk discovery so a user-disk
         // skill with the same name can override it.
         s.skills[CUSTOMIZE_OPENCODE_SKILL_NAME] = {
@@ -330,7 +353,12 @@ export const layer = Layer.effect(
       return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")
     })
 
-    return Service.of({ get, require, all, dirs, available })
+    const remoteSource = Effect.fn("Skill.remoteSource")(function* (name: string) {
+      const s = yield* InstanceState.get(state)
+      return s.remoteSources[name]
+    })
+
+    return Service.of({ get, require, all, dirs, available, remoteSource })
   }),
 )
 
@@ -371,9 +399,17 @@ export function fmt(list: Info[], opts: { verbose: boolean }) {
 }
 
 function remoteSource(discovered: DiscoveryState, match: string): Info["source"] {
-  return discovered.remoteDirs.some((dir) => match === path.join(dir, "SKILL.md") || match.startsWith(dir + path.sep))
-    ? "remote"
-    : "local"
+  return remoteSkillDir(discovered, match) ? "remote" : "local"
+}
+
+function remoteSkillSource(discovered: DiscoveryState, match: string) {
+  const dir = remoteSkillDir(discovered, match)
+  if (!dir) return undefined
+  return discovered.remoteSources[dir]
+}
+
+function remoteSkillDir(discovered: DiscoveryState, match: string) {
+  return discovered.remoteDirs.find((dir) => match === path.join(dir, "SKILL.md") || match.startsWith(dir + path.sep))
 }
 
 export * as Skill from "."

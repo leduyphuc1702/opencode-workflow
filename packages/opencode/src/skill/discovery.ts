@@ -19,7 +19,13 @@ class Index extends Schema.Class<Index>("Index")({
 }) {}
 
 export interface Interface {
-  readonly pull: (url: string) => Effect.Effect<string[]>
+  readonly pull: (url: string) => Effect.Effect<PulledSkill[]>
+}
+
+export type PulledSkill = {
+  dir: string
+  sourceUrl: string
+  rawContentUrl: string
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SkillDiscovery") {}
@@ -54,7 +60,6 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Path.Pat
       const pull = Effect.fn("Discovery.pull")(function* (url: string) {
         const base = url.endsWith("/") ? url : `${url}/`
         const index = new URL("index.json", base).href
-        const host = base.slice(0, -1)
 
         log.info("fetching index", { url: index })
 
@@ -85,22 +90,24 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Path.Pat
           (skill) =>
             Effect.gen(function* () {
               const root = path.join(cache, skill.name)
+              const sourceUrl = new URL(`${skill.name}/`, base).href
+              const rawContentUrl = new URL("SKILL.md", sourceUrl).href
 
               yield* Effect.forEach(
                 skill.files,
-                (file) => download(new URL(file, `${host}/${skill.name}/`).href, path.join(root, file)),
+                (file) => download(new URL(file, sourceUrl).href, path.join(root, file)),
                 {
                   concurrency: fileConcurrency,
                 },
               )
 
               const md = path.join(root, "SKILL.md")
-              return (yield* fs.exists(md).pipe(Effect.orDie)) ? root : null
+              return (yield* fs.exists(md).pipe(Effect.orDie)) ? { dir: root, sourceUrl, rawContentUrl } : null
             }),
           { concurrency: skillConcurrency },
         )
 
-        return dirs.filter((dir): dir is string => dir !== null)
+        return dirs.filter((skill): skill is PulledSkill => skill !== null)
       })
 
       return Service.of({ pull })

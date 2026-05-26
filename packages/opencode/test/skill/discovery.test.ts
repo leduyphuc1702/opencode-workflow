@@ -54,13 +54,16 @@ describe("Discovery.pull", () => {
     Effect.gen(function* () {
       const fsys = yield* AppFileSystem.Service
       const discovery = yield* Discovery.Service
-      const dirs = yield* discovery.pull(CLOUDFLARE_SKILLS_URL)
-      expect(dirs.length).toBeGreaterThan(0)
-      for (const dir of dirs) {
-        expect(dir).toStartWith(cacheDir)
-        const md = path.join(dir, "SKILL.md")
+      const pulled = yield* discovery.pull(CLOUDFLARE_SKILLS_URL)
+      expect(pulled.length).toBeGreaterThan(0)
+      for (const skill of pulled) {
+        expect(skill.dir).toStartWith(cacheDir)
+        expect(skill.rawContentUrl).toBe(new URL("SKILL.md", skill.sourceUrl).href)
+        const md = path.join(skill.dir, "SKILL.md")
         expect(yield* fsys.existsSafe(md)).toBe(true)
       }
+      const cloudflare = pulled.find((skill) => skill.dir.endsWith(path.sep + "cloudflare"))
+      expect(cloudflare?.sourceUrl).toBe(new URL("cloudflare/", CLOUDFLARE_SKILLS_URL).href)
     }),
   )
 
@@ -68,10 +71,10 @@ describe("Discovery.pull", () => {
     Effect.gen(function* () {
       const fsys = yield* AppFileSystem.Service
       const discovery = yield* Discovery.Service
-      const dirs = yield* discovery.pull(CLOUDFLARE_SKILLS_URL.replace(/\/$/, ""))
-      expect(dirs.length).toBeGreaterThan(0)
-      for (const dir of dirs) {
-        const md = path.join(dir, "SKILL.md")
+      const pulled = yield* discovery.pull(CLOUDFLARE_SKILLS_URL.replace(/\/$/, ""))
+      expect(pulled.length).toBeGreaterThan(0)
+      for (const skill of pulled) {
+        const md = path.join(skill.dir, "SKILL.md")
         expect(yield* fsys.existsSafe(md)).toBe(true)
       }
     }),
@@ -98,7 +101,7 @@ describe("Discovery.pull", () => {
     Effect.gen(function* () {
       const fsys = yield* AppFileSystem.Service
       const discovery = yield* Discovery.Service
-      const dirs = yield* discovery.pull(CLOUDFLARE_SKILLS_URL)
+      const dirs = (yield* discovery.pull(CLOUDFLARE_SKILLS_URL)).map((skill) => skill.dir)
       // find a skill dir that should have reference files (e.g. agents-sdk)
       const agentsSdk = dirs.find((d) => d.endsWith(path.sep + "agents-sdk"))
       expect(agentsSdk).toBeDefined()
@@ -130,7 +133,7 @@ describe("Discovery.pull", () => {
       // second pull should return same results from cache
       const second = yield* discovery.pull(CLOUDFLARE_SKILLS_URL)
       expect(second.length).toBe(first.length)
-      expect(second.sort()).toEqual(first.sort())
+      expect(second.map((skill) => skill.dir).sort()).toEqual(first.map((skill) => skill.dir).sort())
 
       // second pull should NOT increment download count
       expect(downloadCount).toBe(firstCount)

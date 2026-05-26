@@ -79,6 +79,19 @@ function backgroundOutput(sessionID: SessionID) {
   ].join("\n")
 }
 
+function taskText(result: MessageV2.WithParts) {
+  const text = result.parts.findLast((item) => item.type === "text")?.text
+  if (text?.trim()) return text
+
+  const workflowBreak = result.parts.findLast(
+    (item): item is MessageV2.ToolPart & { state: MessageV2.ToolStateCompleted } =>
+      item.type === "tool" && item.tool === "workflow_break" && item.state.status === "completed",
+  )
+  if (!workflowBreak) return text ?? ""
+
+  return [workflowBreak.state.title, workflowBreak.state.output].filter((item) => item.trim()).join("\n")
+}
+
 function backgroundMessage(input: {
   sessionID: SessionID
   description: string
@@ -208,7 +221,7 @@ export const TaskTool = Tool.define(
           },
           parts,
         })
-        return result.parts.findLast((item) => item.type === "text")?.text ?? ""
+        return taskText(result)
       })
 
       const resumeWhenIdle: (input: { userID: MessageID; state: "completed" | "error" }) => Effect.Effect<void> =
