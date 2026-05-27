@@ -1,7 +1,8 @@
 import { Effect, Schema } from "effect"
-import path from "path"
 import DESCRIPTION from "./github_skill_search.txt"
 import * as Tool from "./tool"
+import { Process } from "@/util/process"
+import { which } from "@/util/which"
 
 export const Parameters = Schema.Struct({
   query: Schema.String.annotate({ description: "Search query for GitHub skills." }),
@@ -87,7 +88,7 @@ export const GithubSkillSearchTool = Tool.define<typeof Parameters, Metadata, ne
 function runGithubSkillSearch(params: Schema.Schema.Type<typeof Parameters>) {
   return Effect.tryPromise({
     try: async () => {
-      const gh = await findExecutable("gh")
+      const gh = which("gh")
       if (!gh) throw new Error("gh executable not found in PATH")
       const args = [
         "skill",
@@ -98,13 +99,10 @@ function runGithubSkillSearch(params: Schema.Schema.Type<typeof Parameters>) {
         ...(params.limit ? ["--limit", String(params.limit)] : []),
         ...(params.owner ? ["--owner", params.owner] : []),
       ]
-      const proc = Bun.spawn([gh, ...args], { env: spawnEnv(), stdout: "pipe", stderr: "pipe" })
-      const [stdout, stderr, code] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-      ])
-      if (code !== 0) throw new Error(stderr.trim() || stdout.trim() || `gh ${args.join(" ")} failed`)
+      const result = await Process.run([gh, ...args], { env: spawnEnv(), nothrow: true })
+      const stdout = result.stdout.toString()
+      const stderr = result.stderr.toString()
+      if (result.code !== 0) throw new Error(stderr.trim() || stdout.trim() || `gh ${args.join(" ")} failed`)
       return JSON.parse(stdout || "[]") as unknown
     },
     catch: (error) =>
@@ -114,17 +112,6 @@ function runGithubSkillSearch(params: Schema.Schema.Type<typeof Parameters>) {
           : `gh skill search failed: ${String(error)}`,
       ),
   })
-}
-
-async function findExecutable(name: string) {
-  const names = process.platform === "win32" ? [`${name}.exe`, `${name}.cmd`, name] : [name]
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
-    for (const item of names) {
-      const file = path.join(dir, item)
-      if (await Bun.file(file).exists()) return file
-    }
-  }
-  return undefined
 }
 
 function spawnEnv() {

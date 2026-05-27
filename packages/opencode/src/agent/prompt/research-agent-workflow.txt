@@ -4,6 +4,14 @@ Run mandatory external research for the task using web/GitHub/source references.
 Use websearch, webfetch, github_skill_search, repo_clone, or repo_overview as
 needed. Do not edit the user's workspace. Do not ask the user directly.
 
+If websearch is unavailable/disabled or provider search fails, use the approved
+DuckDuckGo MCP shell fallback only with these exact command forms:
+- `npx -y mcporter call --stdio 'uvx duckduckgo-mcp-server' search query="..." max_results=10`
+- `npx -y mcporter call --stdio 'uvx duckduckgo-mcp-server' fetch_content url="https://..."`
+Do not run any other shell command. If github_skill_search fails, use this
+fallback to search GitHub/public docs by URL or query before declaring research
+unavailable.
+
 Separate verified facts from inferences. If web or GitHub access fails, record
 the failure in the artifact and call workflow_break only when the orchestrator
 must choose how to proceed.

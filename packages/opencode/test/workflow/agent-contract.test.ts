@@ -63,4 +63,13 @@ describe("workflow.agent-contract", () => {
     expect(prompt).toContain("manual test guidance")
     expect(prompt).toContain("Do not run")
   })
+
+  test("research agent prompt requires DuckDuckGo fallback for missing websearch", async () => {
+    const prompt = await Bun.file(path.join(promptDir, "research-agent-workflow.txt")).text()
+
+    expect(prompt).toContain("DuckDuckGo MCP shell fallback")
+    expect(prompt).toContain("mcporter call --stdio 'uvx duckduckgo-mcp-server' search")
+    expect(prompt).toContain("mcporter call --stdio 'uvx duckduckgo-mcp-server' fetch_content")
+    expect(prompt).toContain("If github_skill_search fails")
+  })
 })

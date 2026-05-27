@@ -151,6 +151,11 @@ describe("tool.github_skill_search", () => {
     ),
   )
 
+  test("does not depend on Bun APIs in runtime implementation", async () => {
+    const source = await Bun.file(path.join(import.meta.dir, "../../src/tool/github_skill_search.ts")).text()
+    expect(source).not.toContain("Bun.")
+  })
+
   it.live("fails clearly when gh is missing", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {

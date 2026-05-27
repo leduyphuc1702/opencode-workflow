@@ -336,6 +336,11 @@ export const layer = Layer.effect(
                 read: "allow",
                 grep: "allow",
                 glob: "allow",
+                bash: {
+                  "*": "deny",
+                  "npx -y mcporter call --stdio 'uvx duckduckgo-mcp-server' search *": "allow",
+                  "npx -y mcporter call --stdio 'uvx duckduckgo-mcp-server' fetch_content *": "allow",
+                },
                 webfetch: "allow",
                 websearch: "allow",
                 github_skill_search: "allow",

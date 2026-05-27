@@ -132,6 +132,34 @@ it.instance("scout agent allows read-only research tools and repo cache reads", 
   }),
 )
 
+it.instance("research agent allows only DuckDuckGo MCP shell fallback", () =>
+  Effect.gen(function* () {
+    const agent = yield* load((svc) => svc.get("research-agent"))
+    expect(agent).toBeDefined()
+    expect(agent?.mode).toBe("subagent")
+    expect(evalPerm(agent, "webfetch")).toBe("allow")
+    expect(evalPerm(agent, "websearch")).toBe("allow")
+    expect(evalPerm(agent, "github_skill_search")).toBe("allow")
+    expect(
+      Permission.evaluate(
+        "bash",
+        "npx -y mcporter call --stdio 'uvx duckduckgo-mcp-server' search query=\"opencode workflow\" max_results=10",
+        agent!.permission,
+      ).action,
+    ).toBe("allow")
+    expect(
+      Permission.evaluate(
+        "bash",
+        "npx -y mcporter call --stdio 'uvx duckduckgo-mcp-server' fetch_content url=\"https://example.com\"",
+        agent!.permission,
+      ).action,
+    ).toBe("allow")
+    expect(Permission.evaluate("bash", "curl https://example.com", agent!.permission).action).toBe("deny")
+    expect(evalPerm(agent, "edit")).toBe("deny")
+    expect(evalPerm(agent, "write")).toBe("deny")
+  }),
+)
+
 it.instance("skillopt agent is hidden, read-only, and cannot edit skills", () =>
   Effect.gen(function* () {
     const agent = yield* load((svc) => svc.get("skillopt-agent"))
