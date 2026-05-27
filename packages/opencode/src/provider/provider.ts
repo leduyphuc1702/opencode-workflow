@@ -28,6 +28,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { ProviderError } from "./error"
 
 const log = Log.create({ service: "provider" })
 export const NINE_ROUTER_PROVIDER_ID = ProviderID.make("9router")
@@ -62,6 +63,7 @@ export class NineRouterModelsFetchError extends Schema.TaggedErrorClass<NineRout
   },
 ) {}
 
+const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 function shouldUseCopilotResponsesApi(modelID: string): boolean {
   const match = /^gpt-(\d+)/.exec(modelID)
   if (!match) return false
@@ -194,6 +196,15 @@ function isNullSSEEvent(input: string) {
   return lines.length === 1 && /^data:\s*null$/.test(lines[0])
 }
 
+function timeoutController(ms: number) {
+  const ctl = new AbortController()
+  const id = setTimeout(() => ctl.abort(new ProviderError.HeaderTimeoutError(ms)), ms)
+  return {
+    signal: ctl.signal,
+    clear: () => clearTimeout(id),
+  }
+}
+
 function googleVertexAnthropicBaseURL(project: string | undefined, location: string | undefined) {
   if (!project) return
   if (location !== "eu" && location !== "us") return
@@ -303,7 +314,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         async getModel(sdk: any, modelID: string, _options?: Record<string, any>) {
           return sdk.responses(modelID)
         },
-        options: {},
+        options: { headerTimeout: OPENAI_HEADER_TIMEOUT_DEFAULT },
       }),
     xai: () =>
       Effect.succeed({
@@ -1967,16 +1978,21 @@ export const layer = Layer.effect(
 
         const customFetch = options["fetch"]
         const chunkTimeout = options["chunkTimeout"]
+        const headerTimeout = options["headerTimeout"]
         delete options["chunkTimeout"]
+        delete options["headerTimeout"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
+          const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
+          const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
           const signals: AbortSignal[] = []
 
           if (opts.signal) signals.push(opts.signal)
           if (chunkAbortCtl) signals.push(chunkAbortCtl.signal)
+          if (headerTimeoutCtl) signals.push(headerTimeoutCtl.signal)
           if (options["timeout"] !== undefined && options["timeout"] !== null && options["timeout"] !== false)
             signals.push(AbortSignal.timeout(options["timeout"]))
 
@@ -2005,7 +2021,7 @@ export const layer = Layer.effect(
             ...opts,
             // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
             timeout: false,
-          })
+          }).finally(() => headerTimeoutCtl?.clear())
 
           const output = chunkAbortCtl ? wrapSSE(res, chunkTimeout, chunkAbortCtl) : res
           if (model.providerID === NINE_ROUTER_PROVIDER_ID && model.api.npm === "@ai-sdk/openai") {
