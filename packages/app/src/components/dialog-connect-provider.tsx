@@ -330,6 +330,12 @@ export function DialogConnectProvider(props: { provider: string }) {
   })
 
   async function complete() {
+    const disabledProviders = serverSync.data.config.disabled_providers ?? []
+    if (disabledProviders.includes(props.provider)) {
+      await serverSync.updateConfig({
+        disabled_providers: disabledProviders.filter((id) => id !== props.provider),
+      })
+    }
     await serverSDK.client.global.dispose()
     dialog.close()
     showToast({

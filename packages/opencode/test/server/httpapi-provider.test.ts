@@ -273,6 +273,20 @@ function setEnvScoped(key: string, value: string) {
   )
 }
 
+function setFetchScoped(fetch: typeof globalThis.fetch) {
+  return Effect.acquireRelease(
+    Effect.sync(() => {
+      const previous = globalThis.fetch
+      globalThis.fetch = fetch
+      return previous
+    }),
+    (previous) =>
+      Effect.sync(() => {
+        globalThis.fetch = previous
+      }),
+  )
+}
+
 describe("provider HttpApi", () => {
   it.instance.skip(
     "returns public v2 provider not found errors",
@@ -402,6 +416,52 @@ describe("provider HttpApi", () => {
       expect(hasNonZeroModelCost(configBody, "providers", "google")).toBe(true)
     }),
     projectOptions,
+  )
+
+  it.instance(
+    "keeps 9router connected with auth when model fetch fails",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      yield* setEnvScoped(
+        "OPENCODE_AUTH_CONTENT",
+        JSON.stringify({
+          "9router": { type: "api", key: "sk-9router" },
+        }),
+      )
+      yield* setFetchScoped(
+        (() => Promise.resolve(new Response("not found", { status: 404 }))) as unknown as typeof fetch,
+      )
+
+      const response = yield* Effect.promise(() =>
+        Promise.resolve(app().request("/provider", { headers: { "x-opencode-directory": instance.directory } })),
+      )
+
+      expect(response.status).toBe(200)
+
+      const body = yield* Effect.promise(() => response.json())
+      const provider = providerByID(body, "all", "9router")
+      expect(provider).toBeDefined()
+      expect(provider).toMatchObject({ id: "9router", models: {} })
+      expect(isRecord(body) && Array.isArray(body.connected) ? body.connected : []).toContain("9router")
+    }),
+    projectOptions,
+  )
+
+  it.instance(
+    "keeps disabled 9router visible for reconnect",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const response = yield* Effect.promise(() =>
+        Promise.resolve(app().request("/provider", { headers: { "x-opencode-directory": instance.directory } })),
+      )
+
+      expect(response.status).toBe(200)
+
+      const body = yield* Effect.promise(() => response.json())
+      expect(providerByID(body, "all", "9router")).toBeDefined()
+      expect(isRecord(body) && Array.isArray(body.connected) ? body.connected : []).not.toContain("9router")
+    }),
+    { config: { ...projectOptions.config, disabled_providers: ["9router"] } },
   )
 
   it.instance(

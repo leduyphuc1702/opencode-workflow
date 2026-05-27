@@ -109,6 +109,7 @@ export const dict = {
   "dialog.provider.openai.note": "GPT models for fast, capable general AI tasks",
   "dialog.provider.google.note": "Gemini models for fast, structured responses",
   "dialog.provider.openrouter.note": "Access all supported models from one provider",
+  "dialog.provider.9router.note": "Local 9router models with vision and Codex image generation support",
   "dialog.provider.vercel.note": "Unified access to AI models with smart routing",
 
   "dialog.model.select.title": "Select model",
@@ -895,6 +896,12 @@ export const dict = {
   "settings.providers.section.connected": "Connected providers",
   "settings.providers.connected.empty": "No connected providers",
   "settings.providers.connected.environmentDescription": "Connected from your environment variables",
+  "settings.providers.9router.refresh": "Fetch models",
+  "settings.providers.9router.refreshing": "Fetching...",
+  "settings.providers.9router.refresh.toast.title": "9router models refreshed",
+  "settings.providers.9router.refresh.toast.description": "{{count}} models are available.",
+  "settings.providers.9router.refresh.toast.descriptionImage":
+    "{{count}} models are available, including Codex image generation.",
   "settings.providers.section.popular": "Popular providers",
   "settings.providers.custom.description": "Add an OpenAI-compatible provider by base URL.",
   "settings.providers.tag.environment": "Environment",

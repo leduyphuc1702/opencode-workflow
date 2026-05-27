@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, mock, test } from "bun:test"
 import { mkdir, unlink } from "fs/promises"
 import path from "path"
 import { Effect, Layer } from "effect"
@@ -20,6 +20,7 @@ import { InstanceLayer } from "@/project/instance-layer"
 import { testEffect } from "../lib/effect"
 
 const originalEnv = new Map<string, string | undefined>()
+const originalFetch = globalThis.fetch
 
 const rememberEnv = (k: string) => {
   if (!originalEnv.has(k)) originalEnv.set(k, process.env[k])
@@ -46,6 +47,7 @@ const remove = (k: string) =>
   })
 
 afterEach(async () => {
+  globalThis.fetch = originalFetch
   for (const [key, value] of originalEnv) {
     if (value === undefined) delete process.env[key]
     else process.env[key] = value
@@ -1824,3 +1826,57 @@ it.effect("opencode loader keeps paid models when auth exists", () =>
     expect(keyedCount).toBeGreaterThan(0)
   }).pipe(provideMultiInstance),
 )
+
+test("9router model normalization marks vision input and cx image generation", () => {
+  const models = Provider.nineRouterModels({
+    data: [
+      { id: "openai/gpt-5.5", owned_by: "openai" },
+      { id: "cx/gpt-5.5-image", owned_by: "cx" },
+    ],
+  })
+
+  expect(models["openai/gpt-5.5"].capabilities.input.image).toBe(true)
+  expect(models["openai/gpt-5.5"].capabilities.output.image).toBe(false)
+  expect(models["cx/gpt-5.5-image"].capabilities.input.image).toBe(true)
+  expect(models["cx/gpt-5.5-image"].capabilities.output.image).toBe(true)
+  expect(models["cx/gpt-5.5-image"].options.imageGeneration).toEqual({
+    endpoint: Provider.NINE_ROUTER_IMAGE_GENERATION_URL,
+  })
+})
+
+it.instance("9router env key fetches models on provider load", () =>
+  Effect.gen(function* () {
+    const requests: { url: string; init?: RequestInit }[] = []
+    globalThis.fetch = mock((input, init) => {
+      requests.push({ url: String(input), init })
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [{ id: "cx/gpt-5.5-image", owned_by: "cx" }],
+          }),
+          { status: 200 },
+        ),
+      )
+    }) as unknown as typeof fetch
+
+    yield* set("NINE_ROUTER_API_KEY", "env-key")
+    const providers = yield* list
+    const provider = providers[Provider.NINE_ROUTER_PROVIDER_ID]
+
+    expect(provider.source).toBe("env")
+    expect(provider.models["cx/gpt-5.5-image"].capabilities.input.image).toBe(true)
+    expect(provider.options.imageGeneration).toEqual({ endpoint: Provider.NINE_ROUTER_IMAGE_GENERATION_URL })
+    expect(requests.find((request) => request.url === Provider.NINE_ROUTER_MODELS_URL)?.init?.headers).toEqual({
+      Authorization: "Bearer env-key",
+    })
+  }),
+)
+
+test("default model IDs skip providers without models", () => {
+  expect(
+    Provider.defaultModelIDs({
+      empty: { models: {} },
+      filled: { models: { model: { id: "model" } } },
+    }),
+  ).toEqual({ filled: "model" })
+})

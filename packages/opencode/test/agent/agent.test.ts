@@ -160,6 +160,17 @@ it.instance("research agent allows only DuckDuckGo MCP shell fallback", () =>
   }),
 )
 
+it.instance("code reviewer allows open-computer-use MCP controls", () =>
+  Effect.gen(function* () {
+    const agent = yield* load((svc) => svc.get("code-reviewer"))
+    expect(agent).toBeDefined()
+    expect(evalPerm(agent, "open-computer-use_get_app_state")).toBe("allow")
+    expect(evalPerm(agent, "open-computer-use_click")).toBe("allow")
+    expect(evalPerm(agent, "computer-use_get_app_state")).toBe("allow")
+    expect(evalPerm(agent, "computer-use_click")).toBe("allow")
+  }),
+)
+
 it.instance("skillopt agent is hidden, read-only, and cannot edit skills", () =>
   Effect.gen(function* () {
     const agent = yield* load((svc) => svc.get("skillopt-agent"))

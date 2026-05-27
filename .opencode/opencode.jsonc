@@ -2,7 +2,14 @@
   "$schema": "https://opencode.ai/config.json",
   "provider": {},
   "permission": {},
-  "mcp": {},
+  "mcp": {
+    "open-computer-use": {
+      "type": "local",
+      "command": ["open-computer-use", "mcp"],
+      "enabled": true,
+      "timeout": 30000,
+    },
+  },
   "tools": {
     "github-triage": false,
     "github-pr-search": false,

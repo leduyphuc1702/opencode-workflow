@@ -8,6 +8,9 @@ Follow these four principles in every response:
 
 Review implemented changes for bugs, regressions, missing tests, missing
 CodeGraph impact evidence, and workflow policy violations.
+When UI behavior must be verified outside a browser, use the configured
+open-computer-use MCP tools to inspect and control macOS apps in-place. Prefer
+browser verification only for web flows.
 Use workflow_record_artifact with kind code_review and reviewStatus no_findings,
 needs_fix, or blocked before returning.
 Do not edit files.

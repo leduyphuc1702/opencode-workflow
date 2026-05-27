@@ -8,6 +8,7 @@ import { createMemo, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
+import { useMutation, useQueryClient } from "@tanstack/solid-query"
 import { DialogConnectProvider } from "./dialog-connect-provider"
 import { DialogSelectProvider } from "./dialog-select-provider"
 import { DialogCustomProvider } from "./dialog-custom-provider"
@@ -24,6 +25,7 @@ const PROVIDER_NOTES = [
   { match: (id: string) => id === "openai", key: "dialog.provider.openai.note" },
   { match: (id: string) => id === "google", key: "dialog.provider.google.note" },
   { match: (id: string) => id === "openrouter", key: "dialog.provider.openrouter.note" },
+  { match: (id: string) => id === "9router", key: "dialog.provider.9router.note" },
   { match: (id: string) => id === "vercel", key: "dialog.provider.vercel.note" },
 ] as const
 
@@ -33,6 +35,7 @@ export const SettingsProviders: Component = () => {
   const serverSDK = useServerSDK()
   const serverSync = useServerSync()
   const providers = useProviders()
+  const queryClient = useQueryClient()
 
   const connected = createMemo(() => {
     return providers
@@ -126,6 +129,35 @@ export const SettingsProviders: Component = () => {
       })
   }
 
+  const refresh9RouterMutation = useMutation(() => ({
+    mutationFn: async () => {
+      const result = await serverSDK.client.provider["9Router"].models.refresh(undefined, { throwOnError: true })
+      await serverSDK.client.global.dispose()
+      await queryClient.invalidateQueries({ queryKey: [null, "providers"] })
+      await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[1] === "providers" })
+      return result.data
+    },
+    onSuccess: (provider) => {
+      const count = Object.keys(provider?.models ?? {}).length
+      const imageGeneration = Boolean(provider?.options?.imageGeneration)
+      showToast({
+        variant: "success",
+        icon: "circle-check",
+        title: language.t("settings.providers.9router.refresh.toast.title"),
+        description: language.t(
+          imageGeneration
+            ? "settings.providers.9router.refresh.toast.descriptionImage"
+            : "settings.providers.9router.refresh.toast.description",
+          { count },
+        ),
+      })
+    },
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      showToast({ title: language.t("common.requestFailed"), description: message })
+    },
+  }))
+
   return (
     <div class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
       <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
@@ -154,18 +186,34 @@ export const SettingsProviders: Component = () => {
                       <span class="text-14-medium text-text-strong truncate">{item.name}</span>
                       <Tag>{type(item)}</Tag>
                     </div>
-                    <Show
-                      when={canDisconnect(item)}
-                      fallback={
-                        <span class="text-14-regular text-text-base opacity-0 group-hover:opacity-100 transition-opacity duration-200 pr-3 cursor-default">
-                          {language.t("settings.providers.connected.environmentDescription")}
-                        </span>
-                      }
-                    >
-                      <Button size="large" variant="ghost" onClick={() => void disconnect(item.id, item.name)}>
-                        {language.t("common.disconnect")}
-                      </Button>
-                    </Show>
+                    <div class="flex items-center gap-2">
+                      <Show when={item.id === "9router"}>
+                        <Button
+                          size="large"
+                          variant="ghost"
+                          disabled={refresh9RouterMutation.isPending}
+                          onClick={() => refresh9RouterMutation.mutate()}
+                        >
+                          {language.t(
+                            refresh9RouterMutation.isPending
+                              ? "settings.providers.9router.refreshing"
+                              : "settings.providers.9router.refresh",
+                          )}
+                        </Button>
+                      </Show>
+                      <Show
+                        when={canDisconnect(item)}
+                        fallback={
+                          <span class="text-14-regular text-text-base opacity-0 group-hover:opacity-100 transition-opacity duration-200 pr-3 cursor-default">
+                            {language.t("settings.providers.connected.environmentDescription")}
+                          </span>
+                        }
+                      >
+                        <Button size="large" variant="ghost" onClick={() => void disconnect(item.id, item.name)}>
+                          {language.t("common.disconnect")}
+                        </Button>
+                      </Show>
+                    </div>
                   </div>
                 )}
               </For>

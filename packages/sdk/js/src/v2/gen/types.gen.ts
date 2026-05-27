@@ -1768,12 +1768,6 @@ export type ProviderAuthMethod = {
   >
 }
 
-export type ProviderAuthAuthorization = {
-  url: string
-  method: "auto" | "code"
-  instructions: string
-}
-
 export type ProviderAuthError1 = {
   name:
     | "BadRequest"
@@ -1787,6 +1781,12 @@ export type ProviderAuthError1 = {
     message?: string
     kind?: string
   }
+}
+
+export type ProviderAuthAuthorization = {
+  url: string
+  method: "auto" | "code"
+  instructions: string
 }
 
 export type NotFoundError = {
@@ -5010,6 +5010,7 @@ export type AppSkillsResponses = {
     description?: string
     location: string
     content: string
+    source?: "built-in" | "local" | "remote"
   }>
 }
 
@@ -5950,6 +5951,36 @@ export type ProviderAuthResponses = {
 }
 
 export type ProviderAuthResponse = ProviderAuthResponses[keyof ProviderAuthResponses]
+
+export type Provider9RouterModelsRefreshData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/9router/models/refresh"
+}
+
+export type Provider9RouterModelsRefreshErrors = {
+  /**
+   * ProviderAuthError | InvalidRequestError
+   */
+  400: ProviderAuthError1 | InvalidRequestError
+}
+
+export type Provider9RouterModelsRefreshError =
+  Provider9RouterModelsRefreshErrors[keyof Provider9RouterModelsRefreshErrors]
+
+export type Provider9RouterModelsRefreshResponses = {
+  /**
+   * Refreshed 9router provider models
+   */
+  200: Provider
+}
+
+export type Provider9RouterModelsRefreshResponse =
+  Provider9RouterModelsRefreshResponses[keyof Provider9RouterModelsRefreshResponses]
 
 export type ProviderOauthAuthorizeData = {
   body?: {

@@ -30,6 +30,26 @@ import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 
 const log = Log.create({ service: "provider" })
+export const NINE_ROUTER_PROVIDER_ID = ProviderID.make("9router")
+export const NINE_ROUTER_BASE_URL = "http://localhost:20128/v1"
+export const NINE_ROUTER_MODELS_URL = `${NINE_ROUTER_BASE_URL}/models`
+export const NINE_ROUTER_IMAGE_GENERATION_URL = `${NINE_ROUTER_BASE_URL}/images/generations`
+export const NINE_ROUTER_ENV = ["NINE_ROUTER_API_KEY"]
+const NINE_ROUTER_MODELS_METADATA = "9router_models"
+const NINE_ROUTER_MODELS_FETCHED_AT_METADATA = "9router_models_fetched_at"
+
+type NineRouterModelEntry = {
+  id: string
+  ownedBy?: string
+}
+
+export class NineRouterModelsFetchError extends Schema.TaggedErrorClass<NineRouterModelsFetchError>()(
+  "ProviderNineRouterModelsFetchError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
 
 function shouldUseCopilotResponsesApi(modelID: string): boolean {
   const match = /^gpt-(\d+)/.exec(modelID)
@@ -971,7 +991,13 @@ export function toPublicInfo(provider: Info): Info {
 }
 
 export function defaultModelIDs<T extends { models: Record<string, { id: string }> }>(providers: Record<string, T>) {
-  return mapValues(providers, (item) => sort(Object.values(item.models))[0].id)
+  return Object.fromEntries(
+    Object.entries(providers).flatMap(([id, item]) => {
+      const [model] = sort(Object.values(item.models))
+      if (!model) return []
+      return [[id, model.id]]
+    }),
+  )
 }
 
 export class ModelNotFoundError extends Schema.TaggedErrorClass<ModelNotFoundError>()("ProviderModelNotFoundError", {
@@ -1022,6 +1048,7 @@ export interface Interface {
   ) => Effect.Effect<{ providerID: ProviderID; modelID: string } | undefined>
   readonly getSmallModel: (providerID: ProviderID) => Effect.Effect<Model | undefined>
   readonly defaultModel: () => Effect.Effect<{ providerID: ProviderID; modelID: ModelID }, DefaultModelError>
+  readonly refreshNineRouterModels: () => Effect.Effect<Info, NineRouterModelsFetchError>
 }
 
 interface State {
@@ -1155,6 +1182,112 @@ export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
   }
 }
 
+function nineRouterEntries(input: unknown): NineRouterModelEntry[] {
+  if (!isRecord(input)) return []
+  if (!Array.isArray(input.data)) return []
+  return input.data.flatMap((item) => {
+    if (!isRecord(item)) return []
+    if (typeof item.id !== "string" || item.id.trim() === "") return []
+    return [
+      {
+        id: item.id,
+        ...(typeof item.owned_by === "string" ? { ownedBy: item.owned_by } : {}),
+      },
+    ]
+  })
+}
+
+function nineRouterEntriesFromAuth(authInfo: Auth.Info | undefined) {
+  if (authInfo?.type !== "api") return []
+  const raw = authInfo.metadata?.[NINE_ROUTER_MODELS_METADATA]
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((item) => {
+      if (!isRecord(item)) return []
+      if (typeof item.id !== "string" || item.id.trim() === "") return []
+      return [
+        {
+          id: item.id,
+          ...(typeof item.ownedBy === "string" ? { ownedBy: item.ownedBy } : {}),
+        },
+      ]
+    })
+  } catch {
+    return []
+  }
+}
+
+function nineRouterModel(entry: NineRouterModelEntry): Model {
+  const imageGeneration = entry.ownedBy === "cx"
+  return {
+    id: ModelID.make(entry.id),
+    providerID: NINE_ROUTER_PROVIDER_ID,
+    name: entry.id,
+    family: entry.ownedBy ?? "9router",
+    api: {
+      id: entry.id,
+      url: NINE_ROUTER_BASE_URL,
+      npm: "@ai-sdk/openai-compatible",
+    },
+    status: "active",
+    headers: {},
+    options: {
+      ...(entry.ownedBy ? { ownedBy: entry.ownedBy } : {}),
+      ...(imageGeneration ? { imageGeneration: { endpoint: NINE_ROUTER_IMAGE_GENERATION_URL } } : {}),
+    },
+    cost: {
+      input: 0,
+      output: 0,
+      cache: { read: 0, write: 0 },
+    },
+    limit: {
+      context: 0,
+      output: 0,
+    },
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: false },
+      output: { text: true, audio: false, image: imageGeneration, video: false, pdf: false },
+      interleaved: false,
+    },
+    release_date: "",
+    variants: {},
+  }
+}
+
+export function nineRouterModels(input: unknown): Record<string, Model> {
+  return Object.fromEntries(nineRouterEntries(input).map((entry) => [entry.id, nineRouterModel(entry)]))
+}
+
+function nineRouterModelsFromEntries(entries: NineRouterModelEntry[]): Record<string, Model> {
+  return Object.fromEntries(entries.map((entry) => [entry.id, nineRouterModel(entry)]))
+}
+
+function nineRouterProviderOptions(models: Record<string, Model>) {
+  return {
+    baseURL: NINE_ROUTER_BASE_URL,
+    ...(Object.values(models).some((model) => model.options.imageGeneration)
+      ? { imageGeneration: { endpoint: NINE_ROUTER_IMAGE_GENERATION_URL } }
+      : {}),
+  }
+}
+
+export function nineRouterProvider(models: Record<string, Model> = {}): Info {
+  return {
+    id: NINE_ROUTER_PROVIDER_ID,
+    source: "custom",
+    name: "9router",
+    env: NINE_ROUTER_ENV,
+    options: nineRouterProviderOptions(models),
+    models,
+  }
+}
+
 function suggestionModelIDs(provider: Info | undefined, enableExperimentalModels: boolean) {
   if (!provider) return []
   return Object.keys(provider.models).filter((id) => {
@@ -1198,6 +1331,59 @@ export const layer = Layer.effect(
     const modelsDevSvc = yield* ModelsDev.Service
     const runtimeFlags = yield* RuntimeFlags.Service
 
+    const fetchNineRouterModelEntries = Effect.fn("Provider.9router.fetchModels")(function* (
+      authInfo: Auth.Info | undefined,
+      force = false,
+      persist = true,
+    ) {
+      const cached = persist ? nineRouterEntriesFromAuth(authInfo) : []
+      if (cached.length > 0 && !force) return cached
+
+      const apiKey = authInfo?.type === "api" ? authInfo.key : undefined
+      const fetched = yield* Effect.tryPromise({
+        try: async () => {
+          const response = await fetch(NINE_ROUTER_MODELS_URL, {
+            headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+          })
+          if (!response.ok) throw new Error(`9router model fetch failed: ${response.status} ${response.statusText}`)
+          const entries = nineRouterEntries(await response.json())
+          if (entries.length === 0) throw new Error("9router model fetch returned no models")
+          return entries
+        },
+        catch: (cause) =>
+          new NineRouterModelsFetchError({
+            message: cause instanceof Error ? cause.message : String(cause),
+            cause,
+          }),
+      }).pipe(
+        Effect.catch((error: NineRouterModelsFetchError) => {
+          if (cached.length === 0 || force) return Effect.fail(error)
+          log.warn("9router model refresh failed; using cached models", { error })
+          return Effect.succeed(cached)
+        }),
+      )
+
+      if (authInfo?.type === "api" && persist) {
+        yield* auth
+          .set(NINE_ROUTER_PROVIDER_ID, {
+            type: "api",
+            key: authInfo.key,
+            metadata: {
+              ...authInfo.metadata,
+              [NINE_ROUTER_MODELS_METADATA]: JSON.stringify(fetched),
+              [NINE_ROUTER_MODELS_FETCHED_AT_METADATA]: String(Date.now()),
+            },
+          })
+          .pipe(
+            Effect.catch((error: Auth.AuthError) =>
+              Effect.sync(() => log.warn("failed to persist refreshed 9router models", { error })),
+            ),
+          )
+      }
+
+      return fetched
+    })
+
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {
         using _ = log.time("state")
@@ -1206,6 +1392,7 @@ export const layer = Layer.effect(
         const modelsDev = yield* modelsDevSvc.get()
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
         const database = mapValues(catalog, toPublicInfo)
+        database[NINE_ROUTER_PROVIDER_ID] = nineRouterProvider()
 
         const providers: Record<ProviderID, Info> = {} as Record<ProviderID, Info>
         const languages = new Map<string, LanguageModelV3>()
@@ -1383,6 +1570,22 @@ export const layer = Layer.effect(
           if (disabled.has(providerID)) continue
           const apiKey = provider.env.map((item) => envs[item]).find(Boolean)
           if (!apiKey) continue
+          if (providerID === NINE_ROUTER_PROVIDER_ID) {
+            const models = yield* fetchNineRouterModelEntries({ type: "api", key: apiKey }, false, false).pipe(
+              Effect.map(nineRouterModelsFromEntries),
+              Effect.catch((error: NineRouterModelsFetchError) => {
+                log.warn("9router model fetch failed", { error })
+                return Effect.succeed(database[providerID]?.models ?? {})
+              }),
+            )
+            mergeProvider(providerID, {
+              source: "env",
+              key: provider.env.length === 1 ? apiKey : undefined,
+              options: nineRouterProviderOptions(models),
+              models,
+            })
+            continue
+          }
           mergeProvider(providerID, {
             source: "env",
             key: provider.env.length === 1 ? apiKey : undefined,
@@ -1395,6 +1598,22 @@ export const layer = Layer.effect(
           const providerID = ProviderID.make(id)
           if (disabled.has(providerID)) continue
           if (provider.type === "api") {
+            if (providerID === NINE_ROUTER_PROVIDER_ID) {
+              const models = yield* fetchNineRouterModelEntries(provider).pipe(
+                Effect.map(nineRouterModelsFromEntries),
+                Effect.catch((error: NineRouterModelsFetchError) => {
+                  log.warn("9router model fetch failed", { error })
+                  return Effect.succeed(database[providerID]?.models ?? {})
+                }),
+              )
+              mergeProvider(providerID, {
+                source: "api",
+                key: provider.key,
+                options: nineRouterProviderOptions(models),
+                models,
+              })
+              continue
+            }
             mergeProvider(providerID, {
               source: "api",
               key: provider.key,
@@ -1845,7 +2064,34 @@ export const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
+    const refreshNineRouterModels = Effect.fn("Provider.refreshNineRouterModels")(function* () {
+      const authInfo = yield* auth.get(NINE_ROUTER_PROVIDER_ID).pipe(Effect.orDie)
+      const envs = yield* env.all()
+      const envKey = NINE_ROUTER_ENV.map((item) => envs[item]).find(Boolean)
+      const fetchAuthInfo = authInfo?.type === "api" ? authInfo : envKey ? { type: "api" as const, key: envKey } : undefined
+      const entries = yield* fetchNineRouterModelEntries(fetchAuthInfo, true, authInfo?.type === "api")
+      const models = nineRouterModelsFromEntries(entries)
+      yield* InstanceState.invalidate(state)
+      return {
+        ...nineRouterProvider(models),
+        ...(authInfo?.type === "api"
+          ? { source: "api" as const, key: authInfo.key }
+          : envKey
+            ? { source: "env" as const, key: envKey }
+            : {}),
+      }
+    })
+
+    return Service.of({
+      list,
+      getProvider,
+      getModel,
+      getLanguage,
+      closest,
+      getSmallModel,
+      defaultModel,
+      refreshNineRouterModels,
+    })
   }),
 )
 

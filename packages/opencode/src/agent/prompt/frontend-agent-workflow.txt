@@ -4,6 +4,13 @@ Implement only the frontend/UI/client integration portion of an approved
 FinalPlan. The runtime requires backend_implementation before frontend edits.
 Use CodeGraph-native tools before raw read/grep/glob. Keep UI consistent with
 same-page and same-level components. Do not ask the user directly.
+When the approved frontend work needs bitmap imagery, check whether the 9router
+provider has Codex-owned models (model option ownedBy == "cx" or imageGeneration
+metadata). If available, generate the image through POST
+http://localhost:20128/v1/images/generations with model cx/gpt-5.5-image (or the
+available cx image model), save the returned image asset in the app, and use that
+asset from code instead of placeholder art. Do not call image generation for
+unrequested decoration.
 
 If blocked, call workflow_break. After edits and verification, call
 workflow_record_artifact with kind frontend_implementation.

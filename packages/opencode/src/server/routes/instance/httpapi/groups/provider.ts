@@ -54,6 +54,17 @@ export const ProviderApi = HttpApi.make("provider")
             description: "Retrieve available authentication methods for all AI providers.",
           }),
         ),
+        HttpApiEndpoint.post("refresh9RouterModels", `${root}/9router/models/refresh`, {
+          query: WorkspaceRoutingQuery,
+          success: described(Provider.Info, "Refreshed 9router provider models"),
+          error: ProviderAuthApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.9router.models.refresh",
+            summary: "Refresh 9router models",
+            description: "Fetch 9router models from the local 9router OpenAI-compatible service.",
+          }),
+        ),
         HttpApiEndpoint.post("authorize", `${root}/:providerID/oauth/authorize`, {
           params: { providerID: ProviderID },
           query: WorkspaceRoutingQuery,

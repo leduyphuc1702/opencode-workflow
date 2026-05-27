@@ -1,4 +1,5 @@
 import { ProviderAuth } from "@/provider/auth"
+import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { Provider } from "@/provider/provider"
@@ -34,6 +35,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
   Effect.gen(function* () {
     const cfg = yield* Config.Service
     const provider = yield* Provider.Service
+    const authStore = yield* Auth.Service
     const svc = yield* ProviderAuth.Service
 
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
@@ -45,20 +47,40 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       for (const [key, value] of Object.entries(all)) {
         if ((enabled ? enabled.has(key) : true) && !disabled.has(key)) filtered[key] = value
       }
+      const available = mapValues(filtered, (item) => Provider.fromModelsDevProvider(item))
+      const nineRouterEnabled = enabled ? enabled.has(Provider.NINE_ROUTER_PROVIDER_ID) : true
+      const nineRouterDisabled = disabled.has(Provider.NINE_ROUTER_PROVIDER_ID)
+      if (nineRouterEnabled) {
+        available[Provider.NINE_ROUTER_PROVIDER_ID] = Provider.nineRouterProvider()
+      }
       const connected = yield* provider.list()
-      const providers = Object.assign(
-        mapValues(filtered, (item) => Provider.fromModelsDevProvider(item)),
-        connected,
-      )
+      const connectedIDs = new Set(Object.keys(connected))
+      const nineRouterAuth = yield* authStore.get(Provider.NINE_ROUTER_PROVIDER_ID).pipe(Effect.orDie)
+      if (nineRouterAuth && !nineRouterDisabled && Provider.NINE_ROUTER_PROVIDER_ID in available) {
+        connectedIDs.add(Provider.NINE_ROUTER_PROVIDER_ID)
+      }
+      const providers = Object.assign(available, connected)
       return {
         all: Object.values(providers).map(Provider.toPublicInfo),
         default: Provider.defaultModelIDs(providers),
-        connected: Object.keys(connected),
+        connected: [...connectedIDs],
       }
     })
 
     const auth = Effect.fn("ProviderHttpApi.auth")(function* () {
       return yield* svc.methods()
+    })
+
+    const refresh9RouterModels = Effect.fn("ProviderHttpApi.refresh9RouterModels")(function* () {
+      return yield* provider.refreshNineRouterModels().pipe(
+        Effect.mapError(
+          (error) =>
+            new ProviderAuthApiError({
+              name: "BadRequest",
+              data: { providerID: Provider.NINE_ROUTER_PROVIDER_ID, message: error.message },
+            }),
+        ),
+      )
     })
 
     const authorize = Effect.fn("ProviderHttpApi.authorize")(function* (ctx: {
@@ -106,6 +128,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     return handlers
       .handle("list", list)
       .handle("auth", auth)
+      .handle("refresh9RouterModels", refresh9RouterModels)
       .handleRaw("authorize", authorizeRaw)
       .handle("callback", callback)
   }),

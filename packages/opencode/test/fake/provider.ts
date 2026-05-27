@@ -73,6 +73,9 @@ export namespace ProviderTest {
           defaultModel: Effect.fn("TestProvider.defaultModel")(() =>
             Effect.succeed({ providerID: row.id, modelID: mdl.id }),
           ),
+          refreshNineRouterModels: Effect.fn("TestProvider.refreshNineRouterModels")(() =>
+            Effect.succeed(Provider.nineRouterProvider()),
+          ),
           ...override,
         }),
       ),

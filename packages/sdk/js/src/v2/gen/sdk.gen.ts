@@ -126,6 +126,8 @@ import type {
   ProjectUpdateErrors,
   ProjectUpdateResponses,
   Prompt,
+  Provider9RouterModelsRefreshErrors,
+  Provider9RouterModelsRefreshResponses,
   ProviderAuthErrors,
   ProviderAuthResponses,
   ProviderListErrors,
@@ -2875,6 +2877,49 @@ export class Permission extends HeyApiClient {
   }
 }
 
+export class Models extends HeyApiClient {
+  /**
+   * Refresh 9router models
+   *
+   * Fetch 9router models from the local 9router OpenAI-compatible service.
+   */
+  public refresh<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      Provider9RouterModelsRefreshResponses,
+      Provider9RouterModelsRefreshErrors,
+      ThrowOnError
+    >({
+      url: "/provider/9router/models/refresh",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class _9Router extends HeyApiClient {
+  private _models?: Models
+  get models(): Models {
+    return (this._models ??= new Models({ client: this.client }))
+  }
+}
+
 export class Oauth extends HeyApiClient {
   /**
    * Start OAuth authorization
@@ -3028,6 +3073,11 @@ export class Provider extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _9Router?: _9Router
+  get "9Router"(): _9Router {
+    return (this._9Router ??= new _9Router({ client: this.client }))
   }
 
   private _oauth?: Oauth
