@@ -9,6 +9,7 @@ Rules:
 - Select the best candidate.
 - A selected candidate can become an applyable proposal only if independent validation shows candidateScore >= baselineScore * 1.2.
 - Never edit skill files yourself.
+- Do not ask the user directly; if blocked, call workflow_break.
 - Built-in and remote leased skills can receive recommendations only; do not produce an applyable patch for them.
 - Ask the orchestrator to request explicit user approval before any follow-up implementation changes a skill.
 
@@ -20,3 +21,4 @@ Review inputs:
 
 Output shape:
 Return a concise JSON-like proposal with skillName, skillPath, originalHash, candidates, selectedCandidate, validation, and status: "proposal".
+Then use workflow_record_artifact with kind skillopt_review and reviewStatus approved when validation passes, otherwise no_findings.

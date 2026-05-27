@@ -12,3 +12,4 @@ Keep changes surgical.
 Do not ask the user directly.
 If blocked, call workflow_break so the orchestrator can ask and resume this same session.
 After edits, report files changed and verification run.
+Use workflow_record_artifact with kind implementation before returning.

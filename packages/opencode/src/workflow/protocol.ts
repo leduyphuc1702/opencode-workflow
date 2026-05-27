@@ -6,16 +6,60 @@ export type CodeGraphStatus = Schema.Schema.Type<typeof CodeGraphStatus>
 export const WorkflowState = Schema.Literals([
   "intake",
   "codegraph_syncing",
+  "exploring",
   "brainstorming",
   "planning",
   "plan_review",
+  "plan_finalizing",
   "awaiting_plan_approval",
   "implementation",
   "code_review",
+  "awaiting_done_approval",
+  "awaiting_commit_approval",
   "done",
   "failed",
 ])
 export type WorkflowState = Schema.Schema.Type<typeof WorkflowState>
+
+export const WorkflowArtifactKind = Schema.Literals([
+  "intake_spec",
+  "backend_explore",
+  "frontend_explore",
+  "research_explore",
+  "scope_decision",
+  "plan_draft",
+  "plan_review",
+  "final_plan",
+  "implementation",
+  "backend_implementation",
+  "frontend_implementation",
+  "code_review",
+  "done_approval",
+  "commit_approval",
+  "skillopt_review",
+])
+export type WorkflowArtifactKind = Schema.Schema.Type<typeof WorkflowArtifactKind>
+
+export const WorkflowVariant = Schema.Literals(["lite", "full"])
+export type WorkflowVariant = Schema.Schema.Type<typeof WorkflowVariant>
+
+export const WorkflowReviewStatus = Schema.Literals(["approved", "no_findings", "needs_fix", "blocked"])
+export type WorkflowReviewStatus = Schema.Schema.Type<typeof WorkflowReviewStatus>
+
+export const WorkflowArtifact = Schema.Struct({
+  id: Schema.String,
+  kind: WorkflowArtifactKind,
+  cycle: Schema.Int,
+  agent: Schema.String,
+  timestamp: Schema.String,
+  summary: Schema.String,
+  data: Schema.optional(Schema.Unknown),
+  evidenceIds: Schema.Array(Schema.String),
+  expectedChangedFiles: Schema.optional(Schema.Array(Schema.String)),
+  reviewStatus: Schema.optional(WorkflowReviewStatus),
+  variant: Schema.optional(WorkflowVariant),
+})
+export type WorkflowArtifact = Schema.Schema.Type<typeof WorkflowArtifact>
 
 export const BreakRequest = Schema.Struct({
   id: Schema.String,

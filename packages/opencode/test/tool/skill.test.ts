@@ -112,6 +112,63 @@ Use this skill.
     ),
   )
 
+  it.live("records SkillOpt evidence on the parent workflow session", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const skill = path.join(dir, ".opencode", "skill", "parent-skill")
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(skill, "SKILL.md"),
+            `---
+name: parent-skill
+description: Skill for parent workflow evidence.
+---
+
+# Parent Skill
+`,
+          ),
+        )
+
+        const home = process.env.OPENCODE_TEST_HOME
+        process.env.OPENCODE_TEST_HOME = dir
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            process.env.OPENCODE_TEST_HOME = home
+          }),
+        )
+
+        const registry = yield* ToolRegistry.Service
+        const agent = { name: "backend-agent", mode: "subagent" as const, permission: [], options: {} }
+        const tool = (yield* registry.tools({
+          providerID: "opencode" as any,
+          modelID: "gpt-5" as any,
+          agent,
+        })).find((tool) => tool.id === SkillTool.id)
+        if (!tool) throw new Error("Skill tool not found")
+
+        const parentID = SessionID.make("ses_parent_workflow")
+        const childID = SessionID.make("ses_child_skill")
+        const ctx: Tool.Context = {
+          ...baseCtx,
+          sessionID: childID,
+          agent: "backend-agent",
+          extra: { workflowSessionID: parentID },
+          ask: () => Effect.void,
+        }
+
+        yield* tool.execute({ name: "parent-skill" }, ctx)
+        const evidence = yield* WorkflowEvidence.Service
+        const parentEvents = yield* evidence.list(parentID)
+        const childEvents = yield* evidence.list(childID)
+        const proposal = parentEvents.find((event) => event.type === "skillopt_proposal")
+
+        expect(proposal).toBeDefined()
+        expect(childEvents.some((event) => event.type === "skillopt_proposal")).toBe(false)
+        expect((proposal?.data as { trajectory?: { childSessionID?: string } }).trajectory?.childSessionID).toBe(childID)
+      }),
+    ),
+  )
+
   it.live("execute preserves not found message", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {

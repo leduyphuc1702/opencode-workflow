@@ -5,6 +5,7 @@ import { Effect, Option, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { Ripgrep } from "../file/ripgrep"
 import { Skill } from "../skill"
+import { SessionID } from "@/session/schema"
 import { WorkflowEvidence } from "@/workflow/evidence"
 import * as Tool from "./tool"
 import DESCRIPTION from "./skill.txt"
@@ -108,7 +109,7 @@ function recordRemoteLease(
     const contentSha256 = createHash("sha256").update(rawContent).digest("hex")
     const event = yield* evidence.value
       .append({
-        sessionID: ctx.sessionID,
+        sessionID: workflowSessionID(ctx),
         type: "skill_lease",
         summary: `Task-scoped remote skill lease: ${info.name}`,
         data: {
@@ -121,6 +122,8 @@ function recordRemoteLease(
           decision: "lease_for_current_task_only",
           installStatus: "not_installed",
           persistStatus: "not_persisted",
+          callingAgent: ctx.agent,
+          childSessionID: ctx.sessionID,
           rationale: "Remote skill content is loaded for this task only and is not installed or promoted.",
         },
       })
@@ -146,7 +149,7 @@ function recordSkillOptProposal(evidence: Option.Option<WorkflowEvidence.Interfa
     const selectedCandidate = candidates.toSorted((a, b) => b.score - a.score)[0]
     const event = yield* evidence.value
       .append({
-        sessionID: ctx.sessionID,
+        sessionID: workflowSessionID(ctx),
         type: "skillopt_proposal",
         summary: `SkillOpt proposal queued: ${info.name}`,
         data: {
@@ -157,6 +160,7 @@ function recordSkillOptProposal(evidence: Option.Option<WorkflowEvidence.Interfa
           userRequest: lastUserRequest(ctx.messages),
           trajectory: {
             agent: ctx.agent,
+            childSessionID: ctx.sessionID,
             messageID: ctx.messageID,
             callID: ctx.callID,
             loadedSkill: info.name,
@@ -217,6 +221,11 @@ function skillOptCandidates() {
       applyablePatch: false,
     },
   ]
+}
+
+function workflowSessionID(ctx: Tool.Context) {
+  const value = ctx.extra?.workflowSessionID
+  return typeof value === "string" ? SessionID.make(value) : ctx.sessionID
 }
 
 function lastUserRequest(messages: Tool.Context["messages"]) {

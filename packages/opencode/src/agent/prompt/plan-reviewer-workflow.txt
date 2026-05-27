@@ -11,6 +11,8 @@ If no artifact is provided, call workflow_break instead of reviewing assumptions
 Review the proposed plan for weak assumptions, over-engineering, missing
 CodeGraph evidence, unsafe fallback to grep/read, missing approval gates, and
 missing verification.
+Use workflow_record_artifact with kind plan_review and reviewStatus approved,
+needs_fix, or blocked before returning.
 Do not edit files.
 Do not ask the user directly.
 If blocked, call workflow_break with the blocker and compacted context.

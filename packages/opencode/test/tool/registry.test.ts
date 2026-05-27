@@ -130,7 +130,10 @@ describe("tool.registry", () => {
       expect(ids).toContain("codebase_trace")
       expect(ids).toContain("codebase_explore")
       expect(ids).toContain("workflow_state")
+      expect(ids).toContain("workflow_record_artifact")
       expect(ids).toContain("workflow_approve_plan")
+      expect(ids).toContain("workflow_approve_done")
+      expect(ids).toContain("workflow_approve_commit")
       expect(ids).toContain("workflow_break")
       expect(ids).toContain("workflow_resume_break")
     }),
@@ -145,7 +148,15 @@ describe("tool.registry", () => {
         modelID: ModelID.make("test"),
         agent: yield* agents.defaultInfo(),
       })
-      const workflowTools = ["workflow_state", "workflow_approve_plan", "workflow_break", "workflow_resume_break"]
+      const workflowTools = [
+        "workflow_state",
+        "workflow_record_artifact",
+        "workflow_approve_plan",
+        "workflow_approve_done",
+        "workflow_approve_commit",
+        "workflow_break",
+        "workflow_resume_break",
+      ]
 
       for (const id of workflowTools) {
         const tool = tools.find((item) => item.id === id)
@@ -155,9 +166,21 @@ describe("tool.registry", () => {
       }
 
       const workflowBreak = tools.find((item) => item.id === "workflow_break")
+      const workflowRecordArtifact = tools.find((item) => item.id === "workflow_record_artifact")
       const workflowApprovePlan = tools.find((item) => item.id === "workflow_approve_plan")
+      const workflowApproveDone = tools.find((item) => item.id === "workflow_approve_done")
+      const workflowApproveCommit = tools.find((item) => item.id === "workflow_approve_commit")
       const workflowResumeBreak = tools.find((item) => item.id === "workflow_resume_break")
-      if (!workflowBreak || !workflowApprovePlan || !workflowResumeBreak) throw new Error("workflow tools missing")
+      if (
+        !workflowBreak ||
+        !workflowRecordArtifact ||
+        !workflowApprovePlan ||
+        !workflowApproveDone ||
+        !workflowApproveCommit ||
+        !workflowResumeBreak
+      ) {
+        throw new Error("workflow tools missing")
+      }
 
       expect(ToolJsonSchema.fromTool(workflowBreak)).toMatchObject({
         required: ["taskSlice", "reason", "question"],
@@ -170,6 +193,21 @@ describe("tool.registry", () => {
       expect(ToolJsonSchema.fromTool(workflowApprovePlan)).toMatchObject({
         required: ["plan"],
         properties: { plan: { type: "string" } },
+      })
+      expect(ToolJsonSchema.fromTool(workflowRecordArtifact)).toMatchObject({
+        required: ["kind", "summary"],
+        properties: {
+          kind: { type: "string" },
+          summary: { type: "string" },
+        },
+      })
+      expect(ToolJsonSchema.fromTool(workflowApproveDone)).toMatchObject({
+        required: ["summary"],
+        properties: { summary: { type: "string" } },
+      })
+      expect(ToolJsonSchema.fromTool(workflowApproveCommit)).toMatchObject({
+        required: ["summary"],
+        properties: { summary: { type: "string" } },
       })
       expect(ToolJsonSchema.fromTool(workflowResumeBreak)).toMatchObject({
         required: ["breakRequestId", "answer"],

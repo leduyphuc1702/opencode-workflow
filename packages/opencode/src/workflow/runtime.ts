@@ -3,7 +3,17 @@ import { SessionID } from "@/session/schema"
 import { Storage } from "@/storage/storage"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Context, Effect, Layer, Option, Schema } from "effect"
-import { BreakRequest, ContextCheckpoint, EvidenceEvent, ResumePackage, WorkflowState } from "./protocol"
+import {
+  BreakRequest,
+  ContextCheckpoint,
+  EvidenceEvent,
+  ResumePackage,
+  WorkflowArtifact,
+  WorkflowArtifactKind,
+  WorkflowReviewStatus,
+  WorkflowState,
+  WorkflowVariant,
+} from "./protocol"
 import { WorkflowEvidence } from "./evidence"
 
 export type Record = Schema.Schema.Type<typeof Record>
@@ -13,8 +23,14 @@ export const Record = Schema.Struct({
   state: WorkflowState,
   updatedAt: Schema.String,
   evidenceIds: Schema.Array(Schema.String),
+  cycle: Schema.optional(Schema.Int),
+  variant: Schema.optional(WorkflowVariant),
+  artifacts: Schema.optional(Schema.Array(WorkflowArtifact)),
+  approvedPlan: Schema.optional(WorkflowArtifact),
   finalPlanApprovedAt: Schema.optional(Schema.String),
   finalPlanEvidenceIds: Schema.optional(Schema.Array(Schema.String)),
+  doneApprovedAt: Schema.optional(Schema.String),
+  commitApprovedAt: Schema.optional(Schema.String),
   breakRequests: Schema.Array(BreakRequest),
   checkpoints: Schema.Array(ContextCheckpoint),
   resumePackages: Schema.Array(ResumePackage),
@@ -35,12 +51,40 @@ export interface Interface {
     state: WorkflowState
     evidenceId?: string
   }) => Effect.Effect<Record>
+  readonly recordArtifact: (input: {
+    sessionID: SessionID
+    agent: string
+    kind: WorkflowArtifactKind
+    summary: string
+    data?: unknown
+    evidenceIds?: readonly string[]
+    expectedChangedFiles?: readonly string[]
+    reviewStatus?: WorkflowReviewStatus
+    variant?: WorkflowVariant
+  }) => Effect.Effect<{ record: Record; artifact: WorkflowArtifact; evidenceID: string }>
   readonly approveFinalPlan: (input: {
     sessionID: SessionID
     agent: string
     plan: string
     evidenceIds?: readonly string[]
+  }) => Effect.Effect<{ record: Record; evidenceID: string; variant: WorkflowVariant }, Error>
+  readonly restartPlanning: (input: {
+    sessionID: SessionID
+    agent: string
+    reason: string
   }) => Effect.Effect<{ record: Record; evidenceID: string }>
+  readonly approveDone: (input: {
+    sessionID: SessionID
+    agent: string
+    summary: string
+    evidenceIds?: readonly string[]
+  }) => Effect.Effect<{ record: Record; artifact: WorkflowArtifact; evidenceID: string }, Error>
+  readonly approveCommit: (input: {
+    sessionID: SessionID
+    agent: string
+    summary: string
+    evidenceIds?: readonly string[]
+  }) => Effect.Effect<{ record: Record; artifact: WorkflowArtifact; evidenceID: string }, Error>
   readonly beforeTool: (input: BeforeToolInput) => Effect.Effect<{ warning?: string }, Error>
   readonly checkpointBreak: (input: {
     sessionID: SessionID
@@ -78,7 +122,7 @@ export const layer = Layer.effect(
         Effect.orDie,
       )
       const decoded = decodeRecord(raw, { onExcessProperty: "preserve" })
-      if (Option.isSome(decoded)) return decoded.value
+      if (Option.isSome(decoded)) return normalize(decoded.value, sessionID)
       return initial(sessionID)
     })
 
@@ -96,9 +140,56 @@ export const layer = Layer.effect(
       })
     })
 
+    const recordArtifact: Interface["recordArtifact"] = Effect.fn("WorkflowRuntime.recordArtifact")(function* (
+      input,
+    ) {
+      const record = yield* get(input.sessionID)
+      const cycle = record.cycle ?? 0
+      const artifact: WorkflowArtifact = {
+        id: Identifier.create("art", "ascending"),
+        kind: input.kind,
+        cycle,
+        agent: input.agent,
+        timestamp: new Date().toISOString(),
+        summary: input.summary,
+        data: input.data,
+        evidenceIds: [...(input.evidenceIds ?? [])],
+        expectedChangedFiles: input.expectedChangedFiles ? [...input.expectedChangedFiles] : undefined,
+        reviewStatus: input.reviewStatus,
+        variant: input.variant,
+      }
+      const event = yield* evidence.append({
+        sessionID: input.sessionID,
+        type: evidenceType(input.kind),
+        summary: `Workflow artifact recorded: ${input.kind}`,
+        data: artifact,
+      })
+      const nextArtifacts = [...(record.artifacts ?? []), { ...artifact, evidenceIds: unique([...artifact.evidenceIds, event.id]) }]
+      const needsNewCycle = input.kind === "code_review" && input.reviewStatus === "needs_fix"
+      const saved = yield* save({
+        ...record,
+        state: needsNewCycle ? "planning" : stateAfterArtifact(input.kind, input.reviewStatus),
+        cycle: needsNewCycle ? cycle + 1 : cycle,
+        variant: needsNewCycle ? undefined : input.variant ?? record.variant,
+        approvedPlan: needsNewCycle ? undefined : record.approvedPlan,
+        finalPlanApprovedAt: needsNewCycle ? undefined : record.finalPlanApprovedAt,
+        finalPlanEvidenceIds: needsNewCycle ? undefined : record.finalPlanEvidenceIds,
+        evidenceIds: unique([...record.evidenceIds, event.id, ...artifact.evidenceIds]),
+        artifacts: nextArtifacts,
+      })
+      return { record: saved, artifact: nextArtifacts[nextArtifacts.length - 1]!, evidenceID: event.id }
+    })
+
     const approveFinalPlan: Interface["approveFinalPlan"] = Effect.fn("WorkflowRuntime.approveFinalPlan")(function* (
       input,
     ) {
+      const record = yield* get(input.sessionID)
+      const plan = latestArtifact(record, "final_plan")
+      if (!plan) return yield* Effect.fail(new Error("FinalPlan approval requires a recorded final_plan artifact."))
+      if (plan.cycle !== (record.cycle ?? 0)) {
+        return yield* Effect.fail(new Error("FinalPlan approval requires a final_plan artifact from the current cycle."))
+      }
+      const variant: WorkflowVariant = (plan.expectedChangedFiles?.length ?? 0) >= 2 ? "full" : "lite"
       const event = yield* evidence.append({
         sessionID: input.sessionID,
         type: "approval",
@@ -106,35 +197,102 @@ export const layer = Layer.effect(
         data: {
           agent: input.agent,
           plan: input.plan,
+          planArtifact: plan.id,
+          variant,
           evidenceIds: input.evidenceIds ?? [],
         },
       })
-      const record = yield* get(input.sessionID)
       const approved = yield* save({
         ...record,
         state: "implementation",
+        variant,
+        approvedPlan: { ...plan, variant },
         finalPlanApprovedAt: event.timestamp,
         finalPlanEvidenceIds: unique([...(input.evidenceIds ?? []), event.id]),
         evidenceIds: unique([...record.evidenceIds, ...(input.evidenceIds ?? []), event.id]),
       })
-      return { record: approved, evidenceID: event.id }
+      return { record: approved, evidenceID: event.id, variant }
+    })
+
+    const restartPlanning: Interface["restartPlanning"] = Effect.fn("WorkflowRuntime.restartPlanning")(function* (
+      input,
+    ) {
+      const record = yield* get(input.sessionID)
+      const event = yield* evidence.append({
+        sessionID: input.sessionID,
+        type: "approval",
+        summary: "FinalPlan revision requested",
+        data: { agent: input.agent, reason: input.reason, cycle: record.cycle ?? 0 },
+      })
+      const saved = yield* save({
+        ...record,
+        state: "planning",
+        cycle: (record.cycle ?? 0) + 1,
+        variant: undefined,
+        approvedPlan: undefined,
+        finalPlanApprovedAt: undefined,
+        finalPlanEvidenceIds: undefined,
+        evidenceIds: unique([...record.evidenceIds, event.id]),
+      })
+      return { record: saved, evidenceID: event.id }
+    })
+
+    const approveDone: Interface["approveDone"] = Effect.fn("WorkflowRuntime.approveDone")(function* (input) {
+      const record = yield* get(input.sessionID)
+      const review = latestArtifact(record, "code_review")
+      if (!review || review.cycle !== (record.cycle ?? 0)) {
+        return yield* Effect.fail(new Error("Done approval requires a code_review artifact from the current cycle."))
+      }
+      if (review.reviewStatus === "needs_fix" || review.reviewStatus === "blocked") {
+        return yield* Effect.fail(new Error("Done approval is blocked until code_review has no blocking findings."))
+      }
+      const skillEvidence = (yield* evidence.list(input.sessionID)).some((event) => event.type === "skillopt_proposal")
+      if (skillEvidence && !latestArtifact(record, "skillopt_review")) {
+        return yield* Effect.fail(new Error("Done approval requires skillopt_review because one or more skills were used."))
+      }
+      const result = yield* recordArtifact({
+        sessionID: input.sessionID,
+        agent: input.agent,
+        kind: "done_approval",
+        summary: input.summary,
+        evidenceIds: input.evidenceIds ?? [],
+      })
+      const saved = yield* save({ ...result.record, state: "done", doneApprovedAt: result.artifact.timestamp })
+      return { ...result, record: saved }
+    })
+
+    const approveCommit: Interface["approveCommit"] = Effect.fn("WorkflowRuntime.approveCommit")(function* (input) {
+      const record = yield* get(input.sessionID)
+      if (!record.doneApprovedAt) return yield* Effect.fail(new Error("Commit approval requires done approval first."))
+      const result = yield* recordArtifact({
+        sessionID: input.sessionID,
+        agent: input.agent,
+        kind: "commit_approval",
+        summary: input.summary,
+        evidenceIds: input.evidenceIds ?? [],
+      })
+      const saved = yield* save({ ...result.record, state: "done", commitApprovedAt: result.artifact.timestamp })
+      return { ...result, record: saved }
     })
 
     const beforeTool: Interface["beforeTool"] = Effect.fn("WorkflowRuntime.beforeTool")(function* (input) {
       if (!workflowAgents.has(input.agent)) return {}
-      if (mutatingTools.has(input.tool)) {
-        const record = yield* get(input.workflowSessionID)
-        if (!record.finalPlanApprovedAt) {
-          return yield* Effect.fail(
-            new Error(
-              [
-                `Workflow approval gate blocked ${input.tool}.`,
-                "Implementation tools are disabled until the user approves the FinalPlan.",
-                "Use workflow_approve_plan after plan review, then retry this tool call.",
-              ].join(" "),
-            ),
-          )
-        }
+      const record = yield* get(input.workflowSessionID)
+
+      if (input.tool === "task") {
+        const blocker = taskBlocker(record, taskAgent(input.args))
+        if (blocker) return yield* Effect.fail(new Error(blocker))
+      }
+
+      if (input.tool === "bash" && isCommitCommand(input.args) && !record.commitApprovedAt) {
+        return yield* Effect.fail(
+          new Error("Workflow commit gate blocked git commit. Use workflow_approve_commit after done approval."),
+        )
+      }
+
+      if (mutatingTools.has(input.tool) || (input.tool === "bash" && isLikelyMutatingShell(input.args))) {
+        const blocker = mutationBlocker(record, input)
+        if (blocker) return yield* Effect.fail(new Error(blocker))
       }
 
       if (!rawFallbackTools.has(input.tool)) return {}
@@ -151,7 +309,6 @@ export const layer = Layer.effect(
           graphEvidencePresent: graphReady,
         },
       })
-      const record = yield* get(input.workflowSessionID)
       yield* save({ ...record, evidenceIds: unique([...record.evidenceIds, event.id]) })
 
       if (flags.workflowStrictGraphFirst && !graphReady) {
@@ -253,7 +410,18 @@ export const layer = Layer.effect(
       return (yield* evidence.list(workflowSessionID)).some(isGraphEvidence)
     })
 
-    return Service.of({ get, transition, approveFinalPlan, beforeTool, checkpointBreak, resumeBreak })
+    return Service.of({
+      get,
+      transition,
+      recordArtifact,
+      approveFinalPlan,
+      restartPlanning,
+      approveDone,
+      approveCommit,
+      beforeTool,
+      checkpointBreak,
+      resumeBreak,
+    })
   }),
 )
 
@@ -273,10 +441,135 @@ function initial(sessionID: SessionID): Record {
     state: "intake",
     updatedAt: new Date().toISOString(),
     evidenceIds: [],
+    cycle: 0,
+    artifacts: [],
     breakRequests: [],
     checkpoints: [],
     resumePackages: [],
   }
+}
+
+function normalize(record: Record, sessionID: SessionID): Record {
+  return {
+    ...record,
+    sessionID,
+    cycle: record.cycle ?? 0,
+    artifacts: record.artifacts ?? [],
+    breakRequests: record.breakRequests ?? [],
+    checkpoints: record.checkpoints ?? [],
+    resumePackages: record.resumePackages ?? [],
+  }
+}
+
+function latestArtifact(record: Record, kind: WorkflowArtifactKind) {
+  return (record.artifacts ?? [])
+    .filter((artifact) => artifact.kind === kind)
+    .toSorted((a, b) => b.timestamp.localeCompare(a.timestamp))[0]
+}
+
+function hasCurrentArtifact(record: Record, kind: WorkflowArtifactKind) {
+  return (record.artifacts ?? []).some((artifact) => artifact.kind === kind && artifact.cycle === (record.cycle ?? 0))
+}
+
+function hasCurrentArtifacts(record: Record, kinds: readonly WorkflowArtifactKind[]) {
+  return kinds.every((kind) => hasCurrentArtifact(record, kind))
+}
+
+function currentPlanApproved(record: Record) {
+  return !!record.finalPlanApprovedAt && record.approvedPlan?.cycle === (record.cycle ?? 0)
+}
+
+function stateAfterArtifact(kind: WorkflowArtifactKind, reviewStatus?: WorkflowReviewStatus): WorkflowState {
+  if (kind === "intake_spec") return "exploring"
+  if (kind === "scope_decision") return "planning"
+  if (kind === "plan_draft") return "plan_review"
+  if (kind === "plan_review") return "plan_finalizing"
+  if (kind === "final_plan") return "awaiting_plan_approval"
+  if (kind === "code_review" && reviewStatus === "needs_fix") return "planning"
+  if (kind === "code_review") return "awaiting_done_approval"
+  if (kind === "done_approval") return "done"
+  if (kind === "commit_approval") return "done"
+  if (kind.endsWith("_explore")) return "exploring"
+  if (kind.endsWith("_implementation") || kind === "implementation") return "implementation"
+  return "planning"
+}
+
+function evidenceType(kind: WorkflowArtifactKind): WorkflowEvidence.CreateInput["type"] {
+  if (kind === "done_approval" || kind === "commit_approval") return "approval"
+  if (kind === "code_review") return "test"
+  if (kind === "skillopt_review") return "skillopt_proposal"
+  return "graph_query"
+}
+
+function taskBlocker(record: Record, agent: string | undefined) {
+  if (!agent) return
+  if (agent === "plan-agent" && !hasCurrentArtifacts(record, exploreAndScopeArtifacts)) {
+    return "SOL gate blocked plan-agent. Record backend_explore, frontend_explore, research_explore, and scope_decision first."
+  }
+  if (agent === "plan-reviewer" && !hasCurrentArtifact(record, "plan_draft")) {
+    return "SOL gate blocked plan-reviewer. Record a plan_draft artifact first."
+  }
+  if (agent === "plan-finalizer" && !hasCurrentArtifact(record, "plan_review")) {
+    return "SOL gate blocked plan-finalizer. Record a plan_review artifact first."
+  }
+  if (implementationAgents.has(agent) && !currentPlanApproved(record)) {
+    return "SOL gate blocked implementation agent. Approve the current final_plan with workflow_approve_plan first."
+  }
+  if (agent === "frontend-agent" && record.variant === "full" && !hasCurrentArtifact(record, "backend_implementation")) {
+    return "SOL gate blocked frontend-agent. Record backend_implementation before frontend implementation."
+  }
+  if (agent === "code-reviewer" && !implementationReady(record)) {
+    return "SOL gate blocked code-reviewer. Record implementation artifacts before review."
+  }
+}
+
+function mutationBlocker(record: Record, input: BeforeToolInput) {
+  if (!currentPlanApproved(record)) {
+    return `Workflow approval gate blocked ${input.tool}. Implementation tools are disabled until the user approves the FinalPlan.`
+  }
+  if (record.variant === "full") {
+    if (input.agent === "orchestrator-agent" || input.agent === "implementation-agent") {
+      return "SOL full workflow gate blocked direct implementation. Use backend-agent then frontend-agent."
+    }
+    if (input.agent === "frontend-agent" && !hasCurrentArtifact(record, "backend_implementation")) {
+      return "SOL full workflow gate blocked frontend mutation. Record backend_implementation first."
+    }
+  }
+}
+
+function implementationReady(record: Record) {
+  if (record.variant === "full") {
+    return hasCurrentArtifact(record, "backend_implementation") && hasCurrentArtifact(record, "frontend_implementation")
+  }
+  return hasCurrentArtifact(record, "implementation") || hasCurrentArtifact(record, "backend_implementation")
+}
+
+function taskAgent(args: unknown) {
+  if (!args || typeof args !== "object") return
+  const value = (args as { subagent_type?: unknown }).subagent_type
+  return typeof value === "string" ? value : undefined
+}
+
+function shellCommand(args: unknown) {
+  if (!args || typeof args !== "object") return ""
+  const value = (args as { command?: unknown }).command
+  return typeof value === "string" ? value : ""
+}
+
+function isCommitCommand(args: unknown) {
+  return /(^|[;&|]\s*)(git|jj)\s+commit\b/.test(shellCommand(args))
+}
+
+function isLikelyMutatingShell(args: unknown) {
+  const command = shellCommand(args)
+  if (!command) return false
+  return (
+    /(^|[;&|]\s*)(apply_patch|rm|mv|cp|mkdir|touch|chmod|chown)\b/.test(command) ||
+    /(^|[;&|]\s*)git\s+(add|reset|checkout|merge|rebase|cherry-pick)\b/.test(command) ||
+    /(^|[;&|]\s*)(bun|npm|pnpm|yarn)\s+(add|install|remove|update)\b/.test(command) ||
+    /\bsed\s+-i\b/.test(command) ||
+    /(^|[^<])>\s*[^&]/.test(command)
+  )
 }
 
 function isGraphEvidence(event: EvidenceEvent) {
@@ -289,14 +582,27 @@ function unique(items: readonly string[]) {
 
 const workflowAgents = new Set([
   "orchestrator-agent",
+  "backend-explorer",
+  "frontend-explorer",
+  "research-agent",
   "plan-agent",
   "plan-reviewer",
   "plan-finalizer",
+  "backend-agent",
+  "frontend-agent",
   "implementation-agent",
   "code-reviewer",
+  "skillopt-agent",
 ])
 
-const mutatingTools = new Set(["edit", "write", "apply_patch", "bash"])
+const implementationAgents = new Set(["backend-agent", "frontend-agent", "implementation-agent"])
+const exploreAndScopeArtifacts = [
+  "backend_explore",
+  "frontend_explore",
+  "research_explore",
+  "scope_decision",
+] as const
+const mutatingTools = new Set(["edit", "write", "apply_patch"])
 const rawFallbackTools = new Set(["read", "grep", "glob"])
 
 export * as WorkflowRuntime from "./runtime"

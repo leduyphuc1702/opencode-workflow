@@ -74,8 +74,11 @@ import { WorkflowEvidence } from "@/workflow/evidence"
 import { WorkflowRuntime } from "@/workflow/runtime"
 import { Storage } from "@/storage/storage"
 import {
+  WorkflowApproveCommitTool,
+  WorkflowApproveDoneTool,
   WorkflowApprovePlanTool,
   WorkflowBreakTool,
+  WorkflowRecordArtifactTool,
   WorkflowResumeBreakTool,
   WorkflowStateTool,
 } from "./workflow"
@@ -176,7 +179,10 @@ const baseLayer: Layer.Layer<
     const codebaseTrace = yield* CodebaseTraceTool
     const codebaseExplore = yield* CodebaseExploreTool
     const workflowState = yield* WorkflowStateTool
+    const workflowRecordArtifact = yield* WorkflowRecordArtifactTool
     const workflowApprovePlan = yield* WorkflowApprovePlanTool
+    const workflowApproveDone = yield* WorkflowApproveDoneTool
+    const workflowApproveCommit = yield* WorkflowApproveCommitTool
     const workflowBreak = yield* WorkflowBreakTool
     const workflowResumeBreak = yield* WorkflowResumeBreakTool
     const agent = yield* Agent.Service
@@ -302,7 +308,10 @@ const baseLayer: Layer.Layer<
           codebase_trace: Tool.init(codebaseTrace),
           codebase_explore: Tool.init(codebaseExplore),
           workflow_state: Tool.init(workflowState),
+          workflow_record_artifact: Tool.init(workflowRecordArtifact),
           workflow_approve_plan: Tool.init(workflowApprovePlan),
+          workflow_approve_done: Tool.init(workflowApproveDone),
+          workflow_approve_commit: Tool.init(workflowApproveCommit),
           workflow_break: Tool.init(workflowBreak),
           workflow_resume_break: Tool.init(workflowResumeBreak),
         })
@@ -339,7 +348,10 @@ const baseLayer: Layer.Layer<
             tool.codebase_trace,
             tool.codebase_explore,
             tool.workflow_state,
+            tool.workflow_record_artifact,
             tool.workflow_approve_plan,
+            tool.workflow_approve_done,
+            tool.workflow_approve_commit,
             tool.workflow_break,
             tool.workflow_resume_break,
             tool.patch,

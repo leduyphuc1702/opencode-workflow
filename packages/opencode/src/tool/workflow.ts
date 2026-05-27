@@ -1,6 +1,7 @@
 import { Session } from "@/session/session"
 import { SessionID } from "@/session/schema"
 import { WorkflowRuntime } from "@/workflow/runtime"
+import { WorkflowArtifactKind, WorkflowReviewStatus, WorkflowVariant } from "@/workflow/protocol"
 import { Question } from "@/question"
 import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
@@ -21,6 +22,25 @@ const EvidenceIds = Schema.optional(Schema.Array(Schema.String)).annotate({
 
 const ApprovePlanParameters = Schema.Struct({
   plan: Schema.String.annotate({ description: "The complete FinalPlan text that the user is approving." }),
+  evidenceIds: EvidenceIds,
+})
+
+const RecordArtifactParameters = Schema.Struct({
+  kind: WorkflowArtifactKind.annotate({ description: "SOL workflow artifact kind to record." }),
+  summary: Schema.String.annotate({ description: "Concise artifact summary." }),
+  data: Schema.optional(Schema.Unknown).annotate({ description: "Optional structured artifact payload." }),
+  evidenceIds: EvidenceIds,
+  expectedChangedFiles: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description: "Files expected to change. Used by final_plan to choose lite vs full.",
+  }),
+  reviewStatus: Schema.optional(WorkflowReviewStatus).annotate({
+    description: "Review result for plan_review, code_review, or skillopt_review artifacts.",
+  }),
+  variant: Schema.optional(WorkflowVariant).annotate({ description: "Optional explicit SOL workflow variant." }),
+})
+
+const ApprovalParameters = Schema.Struct({
+  summary: Schema.String.annotate({ description: "What the user is approving." }),
   evidenceIds: EvidenceIds,
 })
 
@@ -54,7 +74,7 @@ export const WorkflowStateTool = Tool.define<typeof Empty, Metadata, Services>(
       parameters: Empty,
       execute: (_params, ctx) =>
         Effect.gen(function* () {
-          const sessionID = yield* workflowSessionID(sessions, ctx.sessionID)
+          const sessionID = yield* workflowSessionID(sessions, ctx)
           const record = yield* runtime.get(sessionID)
           return {
             title: `Workflow ${record.state}`,
@@ -62,6 +82,44 @@ export const WorkflowStateTool = Tool.define<typeof Empty, Metadata, Services>(
             output: JSON.stringify(record, null, 2),
           }
         }),
+    }
+  }),
+)
+
+export const WorkflowRecordArtifactTool = Tool.define<typeof RecordArtifactParameters, Metadata, Services>(
+  "workflow_record_artifact",
+  Effect.gen(function* () {
+    const runtime = yield* WorkflowRuntime.Service
+    const sessions = yield* Session.Service
+
+    return {
+      description:
+        "Record a typed SOL workflow artifact. Use this after each required SOL step before moving to the next step.",
+      parameters: RecordArtifactParameters,
+      execute: (params, ctx) =>
+        Effect.gen(function* () {
+          const sessionID = yield* workflowSessionID(sessions, ctx)
+          const result = yield* runtime.recordArtifact({
+            sessionID,
+            agent: ctx.agent,
+            kind: params.kind,
+            summary: params.summary,
+            data: params.data,
+            evidenceIds: params.evidenceIds ?? [],
+            expectedChangedFiles: params.expectedChangedFiles ?? undefined,
+            reviewStatus: params.reviewStatus,
+            variant: params.variant,
+          })
+          return {
+            title: `Artifact ${result.artifact.kind}`,
+            metadata: { state: result.record.state, evidenceID: result.evidenceID },
+            output: JSON.stringify(
+              { artifact: result.artifact, state: result.record.state, evidenceID: result.evidenceID },
+              null,
+              2,
+            ),
+          }
+        }).pipe(Effect.orDie),
     }
   }),
 )
@@ -79,7 +137,12 @@ export const WorkflowApprovePlanTool = Tool.define<typeof ApprovePlanParameters,
       parameters: ApprovePlanParameters,
       execute: (params, ctx) =>
         Effect.gen(function* () {
-          const sessionID = yield* workflowSessionID(sessions, ctx.sessionID)
+          const sessionID = yield* workflowSessionID(sessions, ctx)
+          const record = yield* runtime.get(sessionID)
+          const finalPlan = record.artifacts
+            ?.filter((artifact) => artifact.kind === "final_plan" && artifact.cycle === (record.cycle ?? 0))
+            .toSorted((a, b) => b.timestamp.localeCompare(a.timestamp))[0]
+          if (!finalPlan) return yield* Effect.fail(new Error("workflow_approve_plan requires a final_plan artifact."))
           const answers = yield* question.ask({
             sessionID,
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
@@ -87,21 +150,25 @@ export const WorkflowApprovePlanTool = Tool.define<typeof ApprovePlanParameters,
               {
                 header: "FinalPlan",
                 question: "Approve this FinalPlan and allow implementation to start?",
-                custom: false,
+                custom: true,
                 options: [
                   { label: "Approve", description: "Unlock implementation tools for this workflow session." },
-                  { label: "Revise", description: "Keep implementation blocked and revise the plan." },
+                  { label: "Revise", description: "Keep implementation blocked and start a new planning cycle." },
                 ],
               },
             ],
           })
 
           if (answers[0]?.[0] !== "Approve") {
-            const record = yield* runtime.transition({ sessionID, state: "awaiting_plan_approval" })
+            const result = yield* runtime.restartPlanning({
+              sessionID,
+              agent: ctx.agent,
+              reason: answers[0]?.join("\n") || "User requested FinalPlan revision.",
+            })
             return {
               title: "FinalPlan not approved",
-              metadata: { state: record.state },
-              output: "User did not approve the FinalPlan. Implementation remains blocked.",
+              metadata: { state: result.record.state, evidenceID: result.evidenceID },
+              output: "User did not approve the FinalPlan. Implementation remains blocked and a new planning cycle is required.",
             }
           }
 
@@ -115,9 +182,113 @@ export const WorkflowApprovePlanTool = Tool.define<typeof ApprovePlanParameters,
             title: "FinalPlan approved",
             metadata: { state: result.record.state, evidenceID: result.evidenceID },
             output: [
-              `FinalPlan approved. Implementation tools are now unlocked for session ${sessionID}.`,
+              `FinalPlan approved as ${result.variant}. Implementation tools are now unlocked for session ${sessionID}.`,
               `Approval evidence: ${result.evidenceID}`,
             ].join("\n"),
+          }
+        }).pipe(Effect.orDie),
+    }
+  }),
+)
+
+export const WorkflowApproveDoneTool = Tool.define<typeof ApprovalParameters, Metadata, Services>(
+  "workflow_approve_done",
+  Effect.gen(function* () {
+    const runtime = yield* WorkflowRuntime.Service
+    const question = yield* Question.Service
+    const sessions = yield* Session.Service
+
+    return {
+      description: "Ask the user to approve the completed SOL task before offering commit approval.",
+      parameters: ApprovalParameters,
+      execute: (params, ctx) =>
+        Effect.gen(function* () {
+          const sessionID = yield* workflowSessionID(sessions, ctx)
+          const answers = yield* question.ask({
+            sessionID,
+            tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+            questions: [
+              {
+                header: "Done",
+                question: "Approve this task as done?",
+                custom: true,
+                options: [
+                  { label: "Approve", description: "Mark this SOL workflow done." },
+                  { label: "Revise", description: "Keep the workflow open." },
+                ],
+              },
+            ],
+          })
+          if (answers[0]?.[0] !== "Approve") {
+            const record = yield* runtime.transition({ sessionID, state: "awaiting_done_approval" })
+            return {
+              title: "Done not approved",
+              metadata: { state: record.state },
+              output: "User did not approve done status. Continue the SOL workflow.",
+            }
+          }
+          const result = yield* runtime.approveDone({
+            sessionID,
+            agent: ctx.agent,
+            summary: params.summary,
+            evidenceIds: params.evidenceIds ?? [],
+          })
+          return {
+            title: "Done approved",
+            metadata: { state: result.record.state, evidenceID: result.evidenceID },
+            output: `Done approved. Approval evidence: ${result.evidenceID}`,
+          }
+        }).pipe(Effect.orDie),
+    }
+  }),
+)
+
+export const WorkflowApproveCommitTool = Tool.define<typeof ApprovalParameters, Metadata, Services>(
+  "workflow_approve_commit",
+  Effect.gen(function* () {
+    const runtime = yield* WorkflowRuntime.Service
+    const question = yield* Question.Service
+    const sessions = yield* Session.Service
+
+    return {
+      description: "Ask the user to approve committing after SOL done approval.",
+      parameters: ApprovalParameters,
+      execute: (params, ctx) =>
+        Effect.gen(function* () {
+          const sessionID = yield* workflowSessionID(sessions, ctx)
+          const answers = yield* question.ask({
+            sessionID,
+            tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+            questions: [
+              {
+                header: "Commit",
+                question: "Commit the approved changes?",
+                custom: true,
+                options: [
+                  { label: "Commit", description: "Unlock git commit commands for this workflow." },
+                  { label: "Skip", description: "Do not commit now." },
+                ],
+              },
+            ],
+          })
+          if (answers[0]?.[0] !== "Commit") {
+            const record = yield* runtime.transition({ sessionID, state: "awaiting_commit_approval" })
+            return {
+              title: "Commit not approved",
+              metadata: { state: record.state },
+              output: "User did not approve committing. Git commit commands remain blocked.",
+            }
+          }
+          const result = yield* runtime.approveCommit({
+            sessionID,
+            agent: ctx.agent,
+            summary: params.summary,
+            evidenceIds: params.evidenceIds ?? [],
+          })
+          return {
+            title: "Commit approved",
+            metadata: { state: result.record.state, evidenceID: result.evidenceID },
+            output: `Commit approved. Git commit commands are unlocked. Approval evidence: ${result.evidenceID}`,
           }
         }).pipe(Effect.orDie),
     }
@@ -136,7 +307,7 @@ export const WorkflowBreakTool = Tool.define<typeof BreakParameters, Metadata, S
       parameters: BreakParameters,
       execute: (params, ctx) =>
         Effect.gen(function* () {
-          const sessionID = yield* workflowSessionID(sessions, ctx.sessionID)
+          const sessionID = yield* workflowSessionID(sessions, ctx)
           const result = yield* runtime.checkpointBreak({
             sessionID,
             subagentSessionID: ctx.sessionID,
@@ -185,7 +356,7 @@ export const WorkflowResumeBreakTool = Tool.define<typeof ResumeParameters, Meta
       parameters: ResumeParameters,
       execute: (params, ctx) =>
         Effect.gen(function* () {
-          const sessionID = yield* workflowSessionID(sessions, ctx.sessionID)
+          const sessionID = yield* workflowSessionID(sessions, ctx)
           const result = yield* runtime.resumeBreak({
             sessionID,
             breakRequestId: params.breakRequestId,
@@ -224,10 +395,12 @@ export const WorkflowResumeBreakTool = Tool.define<typeof ResumeParameters, Meta
   }),
 )
 
-function workflowSessionID(sessions: Session.Interface, sessionID: SessionID) {
+function workflowSessionID(sessions: Session.Interface, ctx: Tool.Context) {
   return Effect.gen(function* () {
-    const info = yield* sessions.get(sessionID).pipe(Effect.orDie)
-    return info.parentID ?? sessionID
+    const workflowSessionID = ctx.extra?.workflowSessionID
+    if (typeof workflowSessionID === "string") return SessionID.make(workflowSessionID)
+    const info = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
+    return info.parentID ?? ctx.sessionID
   })
 }
 

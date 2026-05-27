@@ -7,6 +7,7 @@ Follow these four principles in every response:
 4. Goal-Driven Execution — define success criteria and verification.
 
 Produce a concrete implementation plan from CodeGraph-backed evidence.
+Use workflow_record_artifact with kind plan_draft before returning.
 Do not edit files.
 Do not ask the user directly.
 If blocked, call workflow_break with taskSlice, reason, question, options,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Result, Schema } from "effect"
-import { BreakRequest, ContextCheckpoint, EvidenceEvent, ResumePackage } from "@/workflow/protocol"
+import { BreakRequest, ContextCheckpoint, EvidenceEvent, ResumePackage, WorkflowArtifact } from "@/workflow/protocol"
 import { WorkflowRuntime } from "@/workflow/runtime"
 import { SessionID } from "@/session/schema"
 
@@ -66,10 +66,30 @@ describe("workflow.protocol", () => {
     expect(record.resumePackages).toEqual([])
   })
 
+  test("workflow artifacts carry SOL kind, cycle, routing, and review metadata", () => {
+    const artifact = Schema.decodeUnknownSync(WorkflowArtifact)({
+      id: "art_01J5Y5H0AH4Q4NXJ6P4C3P5V2A",
+      kind: "final_plan",
+      cycle: 1,
+      agent: "plan-finalizer",
+      timestamp: new Date(0).toISOString(),
+      summary: "Final plan for backend and frontend files",
+      evidenceIds: ["evd_plan"],
+      expectedChangedFiles: ["src/api.ts", "src/view.tsx"],
+      reviewStatus: "approved",
+      variant: "full",
+    })
+
+    expect(artifact.kind).toBe("final_plan")
+    expect(artifact.cycle).toBe(1)
+    expect(artifact.variant).toBe("full")
+    expect(artifact.expectedChangedFiles).toHaveLength(2)
+  })
+
   test("evidence events include approval, break, resume, and test evidence types", () => {
     const decode = Schema.decodeUnknownSync(EvidenceEvent)
 
-    for (const type of ["approval", "break", "resume", "test"] as const) {
+    for (const type of ["approval", "break", "resume", "test", "skillopt_proposal"] as const) {
       expect(
         decode({
           id: `evd_${type}`,
