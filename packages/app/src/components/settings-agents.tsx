@@ -31,6 +31,12 @@ export const SettingsAgents: Component = () => {
 
   const directory = createMemo(() => decode64(params.dir) ?? "")
   const agents = createMemo(() => (directory() ? serverSync.child(directory())[0].agent : []))
+  const modelPicker = {
+    current: () => undefined,
+    list: models.list,
+    set: () => undefined,
+    visible: models.visible,
+  }
 
   const subagents = createMemo(() =>
     agents()
@@ -46,6 +52,7 @@ export const SettingsAgents: Component = () => {
   const selectModel = (agent: string, current: AgentModelSetting | undefined) => {
     dialog.show(() => (
       <DialogPickModel
+        model={modelPicker}
         current={current}
         onPick={(model) => settings.agents.setModelOverride(agent, { ...model })}
       />
@@ -120,6 +127,7 @@ export const SettingsAgents: Component = () => {
                   onClick={() =>
                     dialog.show(() => (
                       <DialogPickModel
+                        model={modelPicker}
                         current={settings.agents.frontendImageModel()}
                         filter={imageGenerationModel}
                         onPick={(model) => settings.agents.setFrontendImageModel({ ...model })}

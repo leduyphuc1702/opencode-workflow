@@ -17,6 +17,7 @@ const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
 
 type ModelState = ReturnType<typeof useLocal>["model"]
+type ModelListSource = Pick<ModelState, "current" | "list" | "set" | "visible">
 type ModelItem = Extract<ReturnType<ModelState["list"]>[number], { id: string; provider: { id: string; name: string } }>
 
 const ModelList: Component<{
@@ -24,7 +25,7 @@ const ModelList: Component<{
   class?: string
   onSelect: () => void
   action?: JSX.Element
-  model?: ModelState
+  model?: ModelListSource
   filter?: (model: ModelItem) => boolean
   current?: { providerID: string; modelID: string }
   onPick?: (model: { providerID: string; modelID: string }) => void
@@ -248,6 +249,7 @@ export const DialogSelectModel: Component<{ provider?: string; model?: ModelStat
 export const DialogPickModel: Component<{
   title?: string
   provider?: string
+  model?: ModelListSource
   current?: { providerID: string; modelID: string }
   filter?: (model: ModelItem) => boolean
   onPick: (model: { providerID: string; modelID: string }) => void
@@ -259,6 +261,7 @@ export const DialogPickModel: Component<{
     <Dialog title={props.title ?? language.t("dialog.model.select.title")}>
       <ModelList
         provider={props.provider}
+        model={props.model}
         current={props.current}
         filter={props.filter}
         onPick={(model) => {
