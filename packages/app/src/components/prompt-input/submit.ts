@@ -11,6 +11,7 @@ import { useLayout } from "@/context/layout"
 import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
 import { type ContextItem, type ImageAttachmentPart, type Prompt, usePrompt } from "@/context/prompt"
+import { useSettings } from "@/context/settings"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
@@ -34,6 +35,7 @@ export type FollowupDraft = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  userAgentSettingsSystem?: string
 }
 
 type FollowupSendInput = {
@@ -49,6 +51,22 @@ type FollowupSendInput = {
 const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? part.content : "")).join("")
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+
+const userAgentSettingsSystem = (settings: ReturnType<typeof useSettings>) => {
+  const modelOverrides = Object.entries(settings.agents.modelOverrides())
+  const frontendImageModel = settings.agents.frontendImageModel()
+  if (modelOverrides.length === 0 && !frontendImageModel) return undefined
+
+  return JSON.stringify({
+    user_agent_settings: {
+      subagent_model_overrides: Object.fromEntries(modelOverrides),
+      frontend_image_model: frontendImageModel,
+    },
+  })
+}
+
+const withUserAgentSettings = (system: string | undefined, settings: ReturnType<typeof useSettings>) =>
+  [system, userAgentSettingsSystem(settings)].filter((item): item is string => !!item?.trim()).join("\n\n") || undefined
 
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
@@ -159,6 +177,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       messageID,
       parts: requestParts,
       variant: input.draft.variant,
+      system: input.draft.userAgentSettingsSystem,
     })
     return true
   } catch (err) {
@@ -209,6 +228,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const local = useLocal()
   const permission = usePermission()
   const prompt = usePrompt()
+  const settings = useSettings()
   const layout = useLayout()
   const language = useLanguage()
   const params = useParams()
@@ -389,11 +409,18 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    const model = {
-      modelID: currentModel.id,
-      providerID: currentModel.provider.id,
-    }
     const agent = currentAgent.name
+    const override = settings.agents.modelOverrides()[agent]
+    const model = override
+      ? {
+          modelID: override.modelID,
+          providerID: override.providerID,
+        }
+      : {
+          modelID: currentModel.id,
+          providerID: currentModel.provider.id,
+        }
+    const selectedVariant = variant
     const context = prompt.context.items().slice()
     const draft: FollowupDraft = {
       sessionID: session.id,
@@ -402,7 +429,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       context,
       agent,
       model,
-      variant,
+      variant: selectedVariant,
+      userAgentSettingsSystem: withUserAgentSettings(undefined, settings),
     }
 
     const clearInput = () => {
@@ -458,29 +486,27 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const customCommand = sync.data.command.find((c) => c.name === commandName)
       if (customCommand) {
         clearInput()
-        client.session
-          .command({
-            sessionID: session.id,
-            command: commandName,
-            arguments: args.join(" "),
-            agent,
-            model: `${model.providerID}/${model.modelID}`,
-            variant,
-            parts: images.map((attachment) => ({
-              id: Identifier.ascending("part"),
-              type: "file" as const,
-              mime: attachment.mime,
-              url: attachment.dataUrl,
-              filename: attachment.filename,
-            })),
+        client.session.command({
+          sessionID: session.id,
+          command: commandName,
+          arguments: args.join(" "),
+          agent,
+          model: `${model.providerID}/${model.modelID}`,
+          variant: selectedVariant,
+          parts: images.map((attachment) => ({
+            id: Identifier.ascending("part"),
+            type: "file" as const,
+            mime: attachment.mime,
+            url: attachment.dataUrl,
+            filename: attachment.filename,
+          })),
+        }).catch((err) => {
+          showToast({
+            title: language.t("prompt.toast.commandSendFailed.title"),
+            description: formatServerError(err, language.t, language.t("common.requestFailed")),
           })
-          .catch((err) => {
-            showToast({
-              title: language.t("prompt.toast.commandSendFailed.title"),
-              description: formatServerError(err, language.t, language.t("common.requestFailed")),
-            })
-            restoreInput()
-          })
+          restoreInput()
+        })
         return
       }
     }

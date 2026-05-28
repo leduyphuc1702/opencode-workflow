@@ -18,6 +18,11 @@ export interface SoundSettings {
   errors: string
 }
 
+export type AgentModelSetting = {
+  providerID: string
+  modelID: string
+}
+
 export interface Settings {
   general: {
     autoSave: boolean
@@ -48,6 +53,10 @@ export interface Settings {
   }
   notifications: NotificationSettings
   sounds: SoundSettings
+  agents: {
+    modelOverrides: Record<string, AgentModelSetting>
+    frontendImageModel?: AgentModelSetting
+  }
 }
 
 export const monoDefault = "System Mono"
@@ -144,6 +153,9 @@ const defaultSettings: Settings = {
     errorsEnabled: true,
     errors: "nope-03",
   },
+  agents: {
+    modelOverrides: {},
+  },
 }
 
 function withFallback<T>(read: () => T | undefined, fallback: T) {
@@ -165,6 +177,11 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     createEffect(() => {
       if (store.general?.followup !== "queue") return
       setStore("general", "followup", "steer")
+    })
+
+    createEffect(() => {
+      if (store.agents) return
+      setStore("agents", defaultSettings.agents)
     })
 
     return {
@@ -325,6 +342,24 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         errors: withFallback(() => store.sounds?.errors, defaultSettings.sounds.errors),
         setErrors(value: string) {
           setStore("sounds", "errors", value)
+        },
+      },
+      agents: {
+        modelOverrides: withFallback(() => store.agents?.modelOverrides, defaultSettings.agents.modelOverrides),
+        setModelOverride(agent: string, value: AgentModelSetting | undefined) {
+          if (!value) {
+            setStore("agents", "modelOverrides", (current) => {
+              const next = { ...(current ?? {}) }
+              delete next[agent]
+              return next
+            })
+            return
+          }
+          setStore("agents", "modelOverrides", agent, value)
+        },
+        frontendImageModel: withFallback(() => store.agents?.frontendImageModel, defaultSettings.agents.frontendImageModel),
+        setFrontendImageModel(value: AgentModelSetting | undefined) {
+          setStore("agents", "frontendImageModel", value)
         },
       },
     }

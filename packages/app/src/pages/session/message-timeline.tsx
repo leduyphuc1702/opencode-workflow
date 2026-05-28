@@ -908,6 +908,12 @@ export function MessageTimeline(props: {
     const index = sessions.findIndex((s) => s.id === sessionID)
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
+    if (sync.data.session_status[sessionID]?.type !== "idle") {
+      await sdk.client.session.abort({ sessionID }).catch(() => {})
+      sync.set("session_status", sessionID, { type: "idle" })
+      sync.set("todo", sessionID, [])
+    }
+
     const result = await sdk.client.session
       .delete({ sessionID })
       .then((x) => x.data)

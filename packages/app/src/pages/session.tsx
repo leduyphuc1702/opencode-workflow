@@ -1477,8 +1477,12 @@ export default function Page() {
     setFollowup("edit", id, undefined)
   }
 
-  const halt = (sessionID: string) =>
-    busy(sessionID) ? sdk.client.session.abort({ sessionID }).catch(() => {}) : Promise.resolve()
+  const halt = (sessionID: string) => {
+    if (!busy(sessionID)) return Promise.resolve()
+    setUi("pendingMessage", undefined)
+    setFollowup("paused", sessionID, true)
+    return sdk.client.session.abort({ sessionID }).catch(() => {})
+  }
 
   const revertMutation = useMutation(() => ({
     mutationFn: async (input: { sessionID: string; messageID: string }) => {

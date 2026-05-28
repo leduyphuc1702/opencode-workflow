@@ -17,6 +17,7 @@ const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
 
 type ModelState = ReturnType<typeof useLocal>["model"]
+type ModelItem = Extract<ReturnType<ModelState["list"]>[number], { id: string; provider: { id: string; name: string } }>
 
 const ModelList: Component<{
   provider?: string
@@ -24,16 +25,26 @@ const ModelList: Component<{
   onSelect: () => void
   action?: JSX.Element
   model?: ModelState
+  filter?: (model: ModelItem) => boolean
+  current?: { providerID: string; modelID: string }
+  onPick?: (model: { providerID: string; modelID: string }) => void
 }> = (props) => {
   const model = props.model ?? useLocal().model
   const language = useLanguage()
 
-  const models = createMemo(() =>
+  const models = createMemo<ModelItem[]>(() =>
     model
       .list()
+      .filter((m): m is ModelItem => "provider" in m && "id" in m)
       .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
-      .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
+      .filter((m) => (props.provider ? m.provider.id === props.provider : true))
+      .filter((m) => props.filter?.(m) ?? true),
   )
+  const current = createMemo(() => {
+    const value = props.current
+    if (!value) return model.current()
+    return models().find((m) => m.id === value.modelID && m.provider.id === value.providerID)
+  })
 
   return (
     <List
@@ -42,7 +53,7 @@ const ModelList: Component<{
       emptyMessage={language.t("dialog.model.empty")}
       key={(x) => `${x.provider.id}:${x.id}`}
       items={models}
-      current={model.current()}
+      current={current()}
       filterKeys={["provider.name", "name", "id"]}
       sortBy={(a, b) => a.name.localeCompare(b.name)}
       groupBy={(x) => x.provider.name}
@@ -64,6 +75,11 @@ const ModelList: Component<{
         </Tooltip>
       )}
       onSelect={(x) => {
+        if (props.onPick) {
+          if (x) props.onPick({ modelID: x.id, providerID: x.provider.id })
+          props.onSelect()
+          return
+        }
         model.set(x ? { modelID: x.id, providerID: x.provider.id } : undefined, {
           recent: true,
         })
@@ -225,6 +241,32 @@ export const DialogSelectModel: Component<{ provider?: string; model?: ModelStat
       <Button variant="ghost" class="ml-3 mt-5 mb-6 text-text-base self-start" onClick={manage}>
         {language.t("dialog.model.manage")}
       </Button>
+    </Dialog>
+  )
+}
+
+export const DialogPickModel: Component<{
+  title?: string
+  provider?: string
+  current?: { providerID: string; modelID: string }
+  filter?: (model: ModelItem) => boolean
+  onPick: (model: { providerID: string; modelID: string }) => void
+}> = (props) => {
+  const dialog = useDialog()
+  const language = useLanguage()
+
+  return (
+    <Dialog title={props.title ?? language.t("dialog.model.select.title")}>
+      <ModelList
+        provider={props.provider}
+        current={props.current}
+        filter={props.filter}
+        onPick={(model) => {
+          props.onPick(model)
+          dialog.close()
+        }}
+        onSelect={() => dialog.close()}
+      />
     </Dialog>
   )
 }

@@ -313,7 +313,14 @@ export const layer = Layer.effect(
       const ctx = yield* InstanceState.context
       const promptOps = yield* ops()
       const { task: taskTool } = yield* registry.named()
-      const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
+      const settings = userAgentSettings(lastUser)
+      const overrideModel = modelRefFromSettings(settings.subagent_model_overrides?.[task.agent])
+      const taskModel = overrideModel
+        ? yield* getModel(overrideModel.providerID, overrideModel.modelID, sessionID)
+        : task.model
+          ? yield* getModel(task.model.providerID, task.model.modelID, sessionID)
+          : model
+      const taskPrompt = yield* subtaskPromptWithRuntimeContext(task, taskModel, settings)
       const assistantMessage: MessageV2.Assistant = yield* sessions.updateMessage({
         id: MessageID.ascending(),
         role: "assistant",
@@ -339,7 +346,7 @@ export const layer = Layer.effect(
         state: {
           status: "running",
           input: {
-            prompt: task.prompt,
+            prompt: taskPrompt,
             description: task.description,
             subagent_type: task.agent,
             command: task.command,
@@ -348,7 +355,7 @@ export const layer = Layer.effect(
         },
       })
       const taskArgs = {
-        prompt: task.prompt,
+        prompt: taskPrompt,
         description: task.description,
         subagent_type: task.agent,
         command: task.command,
@@ -492,6 +499,42 @@ export const layer = Layer.effect(
         text: "Summarize the task tool output above and continue with your task.",
         synthetic: true,
       } satisfies MessageV2.TextPart)
+    })
+
+    const subtaskPromptWithRuntimeContext = Effect.fn("SessionPrompt.subtaskPromptWithRuntimeContext")(function* (
+      task: MessageV2.SubtaskPart,
+      model: Provider.Model,
+      settings: UserAgentSettings,
+    ) {
+      const context = [`modelOverride: ${model.providerID}/${model.id}`]
+      if (task.agent === "frontend-agent") {
+        const imageGenerationModel = yield* frontendImageGenerationModel(modelRefFromSettings(settings.frontend_image_model))
+        if (imageGenerationModel)
+          context.push(`imageGenerationModel: ${imageGenerationModel.providerID}/${imageGenerationModel.id}`)
+      }
+      return [`<subagent_runtime_context>`, ...context, `</subagent_runtime_context>`, "", task.prompt].join("\n")
+    })
+
+    const frontendImageGenerationModel = Effect.fn("SessionPrompt.frontendImageGenerationModel")(function* (configured?: ModelRefInput) {
+      if (configured) {
+        const selected = yield* provider
+          .getModel(configured.providerID, configured.modelID)
+          .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+        if (selected?.options.imageGeneration) return selected
+        yield* elog.warn("configured frontend_image_model does not support image generation", {
+          providerID: configured.providerID,
+          modelID: configured.modelID,
+        })
+      }
+      const providers = yield* provider.list()
+      const nineRouter = providers[Provider.NINE_ROUTER_PROVIDER_ID]
+      if (!nineRouter) return
+      const models = Object.values(nineRouter.models).filter((model) => model.options.imageGeneration)
+      return (
+        models.find((model) => model.id === "cx/gpt-5.5-image") ??
+        models.find((model) => model.family === "cx") ??
+        models[0]
+      )
     })
 
     const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, ready?: Latch.Latch) {
@@ -1674,6 +1717,41 @@ export const defaultLayer = Layer.suspend(() =>
     ),
   ),
 )
+
+type ModelRefInput = { providerID: ProviderID; modelID: ModelID }
+type UserAgentSettings = {
+  subagent_model_overrides?: Record<string, ModelRefInput | string>
+  frontend_image_model?: ModelRefInput | string
+}
+
+function userAgentSettings(lastUser: MessageV2.User): UserAgentSettings {
+  if (!lastUser.system) return {}
+  return parseUserAgentSettings(lastUser.system)
+}
+
+function parseUserAgentSettings(text: string): UserAgentSettings {
+  const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(text)
+  if (Option.isNone(parsed)) return {}
+  return normalizeUserAgentSettings(parsed.value)
+}
+
+function normalizeUserAgentSettings(value: unknown): UserAgentSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  if ("user_agent_settings" in value) return normalizeUserAgentSettings(value.user_agent_settings)
+  return value as UserAgentSettings
+}
+
+function modelRefFromSettings(value: ModelRefInput | string | undefined): ModelRefInput | undefined {
+  if (!value) return
+  if (typeof value === "string") {
+    const [providerID, ...model] = value.split("/")
+    if (!providerID || model.length === 0) return
+    return { providerID: ProviderID.make(providerID), modelID: ModelID.make(model.join("/")) }
+  }
+  if (!value.providerID || !value.modelID) return
+  return value
+}
+
 const ModelRef = Schema.Struct({
   providerID: ProviderID,
   modelID: ModelID,
