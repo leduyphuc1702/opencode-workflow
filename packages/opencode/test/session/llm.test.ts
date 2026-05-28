@@ -47,6 +47,28 @@ const openAIConfig = (model: ModelsDev.Provider["models"][string], baseURL: stri
   }
 }
 
+const nineRouterConfig = (baseURL: string): Partial<Config.Info> => ({
+  enabled_providers: ["9router"],
+  provider: {
+    "9router": {
+      name: "9router",
+      npm: "@ai-sdk/openai-compatible",
+      api: "http://localhost:20128/v1",
+      options: {
+        apiKey: "local",
+        baseURL,
+      },
+      models: {
+        "cx/gpt-5.5": {
+          name: "cx/gpt-5.5",
+          options: { reasoningEffort: "xhigh" },
+          variants: { xhigh: { reasoningEffort: "xhigh" } },
+        },
+      },
+    },
+  },
+})
+
 const it = testEffect(Layer.mergeAll(LLM.defaultLayer, Provider.defaultLayer))
 
 // LLM.stream returns a Stream, not an Effect, so we can't use the serviceUse proxy.
@@ -999,6 +1021,94 @@ describe("session.llm.stream", () => {
         expect(maxTokens).toBe(undefined) // match codex cli behavior
       }),
     { config: () => openAIConfig(loadFixture("openai", "gpt-5.2").model, `${state.server!.url.origin}/v1`) },
+  )
+
+  it.instance(
+    "ignores 9router null responses SSE event after completion",
+    () =>
+      Effect.gen(function* () {
+        const chunks = [
+          {
+            type: "response.created",
+            response: {
+              id: "resp-9router-null",
+              created_at: Math.floor(Date.now() / 1000),
+              model: "cx/gpt-5.5",
+              service_tier: null,
+            },
+          },
+          {
+            type: "response.output_item.added",
+            output_index: 0,
+            item: { type: "message", id: "item-9router-null", status: "in_progress", role: "assistant", content: [] },
+          },
+          {
+            type: "response.content_part.added",
+            item_id: "item-9router-null",
+            output_index: 0,
+            content_index: 0,
+            part: { type: "output_text", text: "", annotations: [] },
+          },
+          {
+            type: "response.output_text.delta",
+            item_id: "item-9router-null",
+            delta: "OK",
+            logprobs: null,
+          },
+          {
+            type: "response.completed",
+            response: {
+              incomplete_details: null,
+              usage: {
+                input_tokens: 1,
+                input_tokens_details: null,
+                output_tokens: 1,
+                output_tokens_details: null,
+              },
+              service_tier: null,
+            },
+          },
+          null,
+        ]
+        const request = waitRequest("/responses", createEventResponse(chunks, true))
+
+        const resolved = yield* Provider.use.getModel(Provider.NINE_ROUTER_PROVIDER_ID, ModelID.make("cx/gpt-5.5"))
+        const sessionID = SessionID.make("session-9router-null")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          temperature: 0.2,
+        } satisfies Agent.Info
+
+        const user = {
+          id: MessageID.make("msg_9router-null"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: Provider.NINE_ROUTER_PROVIDER_ID, modelID: resolved.id, variant: "xhigh" },
+        } satisfies MessageV2.User
+
+        yield* drain({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["You are a helpful assistant."],
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {},
+        })
+
+        const capture = yield* Effect.promise(() => request)
+        const body = capture.body
+
+        expect(capture.url.pathname.endsWith("/responses")).toBe(true)
+        expect(body.model).toBe("cx/gpt-5.5")
+        expect((body.reasoning as { effort?: string } | undefined)?.effort).toBe("xhigh")
+      }),
+    { config: () => nineRouterConfig(`${state.server!.url.origin}/v1`) },
   )
 
   it.instance(

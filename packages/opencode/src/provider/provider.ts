@@ -116,6 +116,84 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   })
 }
 
+function stripNullSSEData(res: Response) {
+  if (!res.body) return res
+  if (!res.headers.get("content-type")?.includes("text/event-stream")) return res
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+  let buffer = ""
+
+  const body = new ReadableStream<Uint8Array>({
+    async pull(ctrl) {
+      while (true) {
+        const next = await reader.read()
+        if (next.done) {
+          buffer += decoder.decode()
+          if (buffer && !isNullSSEEvent(buffer)) ctrl.enqueue(encoder.encode(buffer))
+          ctrl.close()
+          return
+        }
+
+        buffer += decoder.decode(next.value, { stream: true })
+        const drained = drainSSEEvents(buffer)
+        buffer = drained.rest
+        if (drained.output) {
+          ctrl.enqueue(encoder.encode(drained.output))
+          return
+        }
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason)
+    },
+  })
+
+  const headers = new Headers(res.headers)
+  headers.delete("content-length")
+  return new Response(body, {
+    headers,
+    status: res.status,
+    statusText: res.statusText,
+  })
+}
+
+function drainSSEEvents(input: string) {
+  let rest = input
+  let output = ""
+
+  while (true) {
+    const next = takeSSEEvent(rest)
+    if (!next) return { output, rest }
+    if (!isNullSSEEvent(next.event)) output += next.event + next.separator
+    rest = next.rest
+  }
+}
+
+function takeSSEEvent(input: string) {
+  const lf = input.indexOf("\n\n")
+  const crlf = input.indexOf("\r\n\r\n")
+  if (lf === -1 && crlf === -1) return
+
+  const useCRLF = crlf !== -1 && (lf === -1 || crlf < lf)
+  const index = useCRLF ? crlf : lf
+  const separator = useCRLF ? "\r\n\r\n" : "\n\n"
+  return {
+    event: input.slice(0, index),
+    rest: input.slice(index + separator.length),
+    separator,
+  }
+}
+
+function isNullSSEEvent(input: string) {
+  const lines = input
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith(":"))
+  return lines.length === 1 && /^data:\s*null$/.test(lines[0])
+}
+
 function googleVertexAnthropicBaseURL(project: string | undefined, location: string | undefined) {
   if (!project) return
   if (location !== "eu" && location !== "us") return
@@ -1929,8 +2007,11 @@ export const layer = Layer.effect(
             timeout: false,
           })
 
-          if (!chunkAbortCtl) return res
-          return wrapSSE(res, chunkTimeout, chunkAbortCtl)
+          const output = chunkAbortCtl ? wrapSSE(res, chunkTimeout, chunkAbortCtl) : res
+          if (model.providerID === NINE_ROUTER_PROVIDER_ID && model.api.npm === "@ai-sdk/openai") {
+            return stripNullSSEData(output)
+          }
+          return output
         }
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]
