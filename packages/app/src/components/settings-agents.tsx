@@ -5,8 +5,10 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createMemo, For, Show, type Component } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
+import { useServerSync } from "@/context/server-sync"
 import { useSettings, type AgentModelSetting } from "@/context/settings"
-import { useSync } from "@/context/sync"
+import { decode64 } from "@/utils/base64"
+import { useParams } from "@solidjs/router"
 import { DialogPickModel } from "./dialog-select-model"
 import { SettingsList } from "./settings-list"
 
@@ -24,10 +26,14 @@ export const SettingsAgents: Component = () => {
   const language = useLanguage()
   const models = useModels()
   const settings = useSettings()
-  const sync = useSync()
+  const serverSync = useServerSync()
+  const params = useParams()
+
+  const directory = createMemo(() => decode64(params.dir) ?? "")
+  const agents = createMemo(() => (directory() ? serverSync.child(directory())[0].agent : []))
 
   const subagents = createMemo(() =>
-    sync.data.agent
+    agents()
       .filter((agent) => agent.mode === "subagent" || agent.mode === "all")
       .sort((a, b) => a.name.localeCompare(b.name)),
   )
