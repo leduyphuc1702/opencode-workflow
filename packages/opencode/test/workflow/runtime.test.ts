@@ -225,7 +225,7 @@ describe("workflow.runtime", () => {
     }),
   )
 
-  it.effect("invalidates implementation approval after code review needs fixes", () =>
+  it.effect("keeps implementation approval for small code review fixes", () =>
     Effect.gen(function* () {
       const runtime = yield* WorkflowRuntime.Service
       const sessionID = id("fix")
@@ -247,10 +247,51 @@ describe("workflow.runtime", () => {
         reviewStatus: "needs_fix",
       })
 
+      expect(reviewed.record.cycle).toBe(0)
+      expect(reviewed.record.state).toBe("implementation")
+      expect(reviewed.record.finalPlanApprovedAt).toBeDefined()
+
+      const blockedDone = yield* runtime
+        .approveDone({ sessionID, agent: "orchestrator-agent", summary: "done" })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(blockedDone)).toBe(true)
+
+      yield* runtime.beforeTool({
+        workflowSessionID: sessionID,
+        currentSessionID: sessionID,
+        agent: "orchestrator-agent",
+        tool: "write",
+        args: { filePath: "src/example.ts" },
+      })
+    }),
+  )
+
+  it.effect("restarts planning when code review is blocked", () =>
+    Effect.gen(function* () {
+      const runtime = yield* WorkflowRuntime.Service
+      const sessionID = id("blocked-review")
+
+      yield* runtime.recordArtifact({
+        sessionID,
+        agent: "plan-finalizer",
+        kind: "final_plan",
+        summary: "lite",
+        expectedChangedFiles: ["src/example.ts"],
+      })
+      yield* runtime.approveFinalPlan({ sessionID, agent: "orchestrator-agent", plan: "FinalPlan" })
+      yield* runtime.recordArtifact({ sessionID, agent: "orchestrator-agent", kind: "implementation", summary: "done" })
+      const reviewed = yield* runtime.recordArtifact({
+        sessionID,
+        agent: "code-reviewer",
+        kind: "code_review",
+        summary: "blocked",
+        reviewStatus: "blocked",
+      })
+
       expect(reviewed.record.cycle).toBe(1)
       expect(reviewed.record.finalPlanApprovedAt).toBeUndefined()
 
-      const blocked = yield* runtime
+      const blockedWrite = yield* runtime
         .beforeTool({
           workflowSessionID: sessionID,
           currentSessionID: sessionID,
@@ -259,7 +300,7 @@ describe("workflow.runtime", () => {
           args: { filePath: "src/example.ts" },
         })
         .pipe(Effect.exit)
-      expect(Exit.isFailure(blocked)).toBe(true)
+      expect(Exit.isFailure(blockedWrite)).toBe(true)
     }),
   )
 

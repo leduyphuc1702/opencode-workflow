@@ -165,15 +165,15 @@ export const layer = Layer.effect(
         data: artifact,
       })
       const nextArtifacts = [...(record.artifacts ?? []), { ...artifact, evidenceIds: unique([...artifact.evidenceIds, event.id]) }]
-      const needsNewCycle = input.kind === "code_review" && input.reviewStatus === "needs_fix"
+      const restartsPlanning = input.kind === "code_review" && input.reviewStatus === "blocked"
       const saved = yield* save({
         ...record,
-        state: needsNewCycle ? "planning" : stateAfterArtifact(input.kind, input.reviewStatus),
-        cycle: needsNewCycle ? cycle + 1 : cycle,
-        variant: needsNewCycle ? undefined : input.variant ?? record.variant,
-        approvedPlan: needsNewCycle ? undefined : record.approvedPlan,
-        finalPlanApprovedAt: needsNewCycle ? undefined : record.finalPlanApprovedAt,
-        finalPlanEvidenceIds: needsNewCycle ? undefined : record.finalPlanEvidenceIds,
+        state: restartsPlanning ? "planning" : stateAfterArtifact(input.kind, input.reviewStatus),
+        cycle: restartsPlanning ? cycle + 1 : cycle,
+        variant: restartsPlanning ? undefined : input.variant ?? record.variant,
+        approvedPlan: restartsPlanning ? undefined : record.approvedPlan,
+        finalPlanApprovedAt: restartsPlanning ? undefined : record.finalPlanApprovedAt,
+        finalPlanEvidenceIds: restartsPlanning ? undefined : record.finalPlanEvidenceIds,
         evidenceIds: unique([...record.evidenceIds, event.id, ...artifact.evidenceIds]),
         artifacts: nextArtifacts,
       })
@@ -485,7 +485,8 @@ function stateAfterArtifact(kind: WorkflowArtifactKind, reviewStatus?: WorkflowR
   if (kind === "plan_draft") return "plan_review"
   if (kind === "plan_review") return "plan_finalizing"
   if (kind === "final_plan") return "awaiting_plan_approval"
-  if (kind === "code_review" && reviewStatus === "needs_fix") return "planning"
+  if (kind === "code_review" && reviewStatus === "needs_fix") return "implementation"
+  if (kind === "code_review" && reviewStatus === "blocked") return "planning"
   if (kind === "code_review") return "awaiting_done_approval"
   if (kind === "done_approval") return "done"
   if (kind === "commit_approval") return "done"

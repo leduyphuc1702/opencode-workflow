@@ -13,6 +13,9 @@ open-computer-use MCP tools to inspect and control macOS apps in-place. Prefer
 browser verification only for web flows.
 Use workflow_record_artifact with kind code_review and reviewStatus no_findings,
 needs_fix, or blocked before returning.
+Use needs_fix for small, in-scope findings the implementation agent can repair
+under the approved FinalPlan. Use blocked when the finding changes scope,
+invalidates the plan, or requires user/product input before more edits.
 Do not edit files.
 Do not ask the user directly.
 If blocked, call workflow_break with the blocker and compacted context.

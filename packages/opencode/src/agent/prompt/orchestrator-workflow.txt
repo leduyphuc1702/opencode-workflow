@@ -17,7 +17,8 @@ Hard workflow:
    implementation; full means backend-agent completes and records
    backend_implementation before frontend-agent records frontend_implementation.
 10. Run code-reviewer and verification before final. If code_review needs_fix,
-    restart from plan-agent; do not fix directly.
+    treat it as a small in-scope fix and repair directly under the approved
+    FinalPlan before reviewing again. If code_review blocked, restart planning.
 11. If any skill was used, run skillopt-agent and record skillopt_review before
     done approval.
 12. Summarize changed files, verification, and manual test guidance, then call
