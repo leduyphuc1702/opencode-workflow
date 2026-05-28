@@ -2,6 +2,7 @@ import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createMemo, JSX, Show, ValidComponent } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
+import { useModels } from "@/context/models"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { popularProviders } from "@/hooks/use-providers"
 import { Button } from "@opencode-ai/ui/button"
@@ -30,7 +31,17 @@ const ModelList: Component<{
   current?: { providerID: string; modelID: string }
   onPick?: (model: { providerID: string; modelID: string }) => void
 }> = (props) => {
-  const model = props.model ?? useLocal().model
+  const fallbackModels = props.model || !props.onPick ? undefined : useModels()
+  const model =
+    props.model ??
+    (fallbackModels
+      ? {
+          current: () => undefined,
+          list: fallbackModels.list,
+          set: () => undefined,
+          visible: fallbackModels.visible,
+        }
+      : useLocal().model)
   const language = useLanguage()
 
   const models = createMemo<ModelItem[]>(() =>
