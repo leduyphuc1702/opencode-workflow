@@ -3,6 +3,7 @@ import fs from "fs/promises"
 import path from "path"
 import { Effect } from "effect"
 import { CodeGraph } from "@/codegraph"
+import { InstanceRef } from "@/effect/instance-ref"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -42,6 +43,42 @@ describe("codegraph.service", () => {
       expect(progress).toContain(100)
     }),
   )
+
+  it.instance("initializes the exact project when a parent directory already has CodeGraph", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const instance = yield* InstanceRef
+      const child = path.join(test.directory, "child")
+      const bin = path.join(test.directory, "fake-codegraph.js")
+      yield* Effect.promise(() => fs.mkdir(path.join(test.directory, ".codegraph"), { recursive: true }))
+      yield* Effect.promise(() => Bun.write(path.join(test.directory, ".codegraph", "codegraph.db"), "parent"))
+      yield* Effect.promise(() => fs.mkdir(child, { recursive: true }))
+      yield* Effect.promise(() => Bun.write(bin, fakeCodeGraphCli()))
+      yield* Effect.promise(() => fs.chmod(bin, 0o755))
+      process.env.OPENCODE_CODEGRAPH_BIN = bin
+
+      const service = yield* CodeGraph.Service
+      const childInstance = {
+        ...instance!,
+        directory: child,
+      }
+      const before = yield* service.status().pipe(Effect.provideService(InstanceRef, childInstance))
+      const status = yield* service.ensureReady().pipe(Effect.provideService(InstanceRef, childInstance))
+
+      expect(before.status).toBe("idle")
+      expect(before.initialized).toBe(false)
+      expect(
+        yield* Effect.promise(() =>
+          fs
+            .stat(path.join(child, ".codegraph", "codegraph.db"))
+            .then(() => true)
+            .catch(() => false),
+        ),
+      ).toBe(true)
+      expect(status.status).toBe("ready")
+      expect(status.initialized).toBe(true)
+    }),
+  )
 })
 
 function fakeCodeGraphCli() {
@@ -50,8 +87,35 @@ const fs = require('fs')
 const path = require('path')
 const args = process.argv.slice(2)
 const command = args[0]
-const project = args.find((arg) => arg.startsWith('/')) || process.cwd()
-const marker = path.join(project, '.fake-codegraph-ready')
+const projectArg = args.find((arg) => arg.startsWith('/')) || process.cwd()
+
+function dbPath(project) {
+  return path.join(project, '.codegraph', 'codegraph.db')
+}
+
+function isInitialized(project) {
+  return fs.existsSync(dbPath(project))
+}
+
+function resolveProjectPath(input) {
+  let current = path.resolve(input)
+  if (isInitialized(current)) return current
+
+  const root = path.parse(current).root
+  while (current !== root) {
+    const parent = path.dirname(current)
+    if (parent === current) break
+    current = parent
+    if (isInitialized(current)) return current
+  }
+
+  return path.resolve(input)
+}
+
+function initProject(project) {
+  fs.mkdirSync(path.join(project, '.codegraph'), { recursive: true })
+  fs.writeFileSync(dbPath(project), 'ready')
+}
 
 if (command === '--version') {
   console.log('0.0.0-test')
@@ -59,16 +123,24 @@ if (command === '--version') {
 }
 
 if (command === 'status') {
-  const initialized = fs.existsSync(marker)
+  const project = resolveProjectPath(projectArg)
+  const initialized = isInitialized(project)
   console.log(JSON.stringify({
     initialized,
+    projectPath: project,
     pendingChanges: { added: 0, modified: 0, removed: 0 }
   }))
   process.exit(0)
 }
 
-if (command === 'init' || command === 'index' || command === 'sync') {
-  fs.writeFileSync(marker, 'ready')
+if (command === 'init') {
+  initProject(path.resolve(projectArg))
+  process.exit(0)
+}
+
+if (command === 'index' || command === 'sync') {
+  const project = resolveProjectPath(projectArg)
+  if (!isInitialized(project)) process.exit(1)
   process.exit(0)
 }
 

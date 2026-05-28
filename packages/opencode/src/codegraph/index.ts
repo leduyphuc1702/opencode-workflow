@@ -169,10 +169,23 @@ export const layer = Layer.effect(
         })
 
         const readStatus = Effect.fn("CodeGraph.readStatus")(function* () {
+          if (!isProjectInitialized(ctx.directory)) {
+            current = {
+              ...current,
+              status: "idle",
+              initialized: false,
+              version: yield* version(),
+              lastStatusAt: new Date().toISOString(),
+              pendingChanges: { added: 0, modified: 0, removed: 0 },
+              raw: undefined,
+            }
+            return current
+          }
+
           const result = yield* runCli(["status", ctx.directory, "-j"], { allowFailure: true })
           const raw = parseJson(result.stdout)
           const pending = pendingChanges(raw)
-          const initialized = isRecord(raw) && raw.initialized === true
+          const initialized = isRecord(raw) && raw.initialized === true && statusMatchesProject(raw, ctx.directory)
           const status: Status = !initialized
             ? "idle"
             : pending.added + pending.modified + pending.removed > 0
@@ -423,6 +436,15 @@ function parseJson(input: string): unknown {
   } catch {
     return undefined
   }
+}
+
+function isProjectInitialized(projectPath: string) {
+  return existsSync(path.join(projectPath, ".codegraph", "codegraph.db"))
+}
+
+function statusMatchesProject(value: Record<string, unknown>, projectPath: string) {
+  if (typeof value.projectPath !== "string") return true
+  return path.resolve(value.projectPath) === path.resolve(projectPath)
 }
 
 function pendingChanges(value: unknown) {
