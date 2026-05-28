@@ -378,6 +378,25 @@ describe("ProviderTransform.options - gpt-5 reasoningEffort", () => {
 
     expect(result.reasoningEffort).toBeUndefined()
   })
+
+  test("9router cx gpt-5.5 forces reasoning on OpenAI Responses", () => {
+    const model = {
+      ...createModel("cx/gpt-5.5"),
+      id: "cx/gpt-5.5",
+      providerID: "9router",
+      api: {
+        id: "cx/gpt-5.5",
+        url: "http://localhost:20128/v1",
+        npm: "@ai-sdk/openai",
+      },
+    }
+    const result = ProviderTransform.options({ model, sessionID, providerOptions: {} })
+
+    expect(result.reasoningEffort).toBe("medium")
+    expect(result.reasoningSummary).toBe("auto")
+    expect(result.forceReasoning).toBe(true)
+    expect(result.include).toEqual(["reasoning.encrypted_content"])
+  })
 })
 
 describe("ProviderTransform.options - gateway", () => {

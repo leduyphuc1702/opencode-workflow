@@ -1141,6 +1141,7 @@ export function options(input: {
       result["reasoningSummary"] = "auto"
       if (input.model.api.npm === "@ai-sdk/openai") {
         result["include"] = INCLUDE_ENCRYPTED_REASONING
+        if (input.model.providerID === "9router") result["forceReasoning"] = true
       }
     }
 

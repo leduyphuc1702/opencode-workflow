@@ -1831,10 +1831,13 @@ test("9router model normalization marks vision input and cx image generation", (
   const models = Provider.nineRouterModels({
     data: [
       { id: "openai/gpt-5.5", owned_by: "openai" },
+      { id: "cx/gpt-5.5", owned_by: "cx" },
       { id: "cx/gpt-5.5-image", owned_by: "cx" },
     ],
   })
 
+  expect(models["cx/gpt-5.5"].api.npm).toBe("@ai-sdk/openai")
+  expect(models["cx/gpt-5.5-image"].api.npm).toBe("@ai-sdk/openai-compatible")
   expect(models["openai/gpt-5.5"].capabilities.input.image).toBe(true)
   expect(models["openai/gpt-5.5"].capabilities.output.image).toBe(false)
   expect(models["cx/gpt-5.5-image"].capabilities.input.image).toBe(true)
@@ -1843,6 +1846,31 @@ test("9router model normalization marks vision input and cx image generation", (
     endpoint: Provider.NINE_ROUTER_IMAGE_GENERATION_URL,
   })
 })
+
+it.instance(
+  "9router config cx text models use OpenAI Responses even with provider-level OpenAI-compatible npm",
+  Effect.gen(function* () {
+    const providers = yield* list
+    const provider = providers[Provider.NINE_ROUTER_PROVIDER_ID]
+
+    expect(provider.models["cx/gpt-5.5"].api.npm).toBe("@ai-sdk/openai")
+    expect(provider.models["ds/deepseek-v4-pro"].api.npm).toBe("@ai-sdk/openai-compatible")
+  }),
+  {
+    config: {
+      provider: {
+        "9router": {
+          name: "9router",
+          npm: "@ai-sdk/openai-compatible",
+          models: {
+            "cx/gpt-5.5": { name: "cx/gpt-5.5" },
+            "ds/deepseek-v4-pro": { name: "ds/deepseek-v4-pro" },
+          },
+        },
+      },
+    },
+  },
+)
 
 test("9router model normalization uses rich metadata defaults", () => {
   const models = Provider.nineRouterModels({ data: [{ id: "openai/gpt-5.5", owned_by: "openai" }] })

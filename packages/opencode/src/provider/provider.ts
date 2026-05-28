@@ -1248,6 +1248,11 @@ function nineRouterSupportedReasoning(input: unknown) {
   )
 }
 
+function nineRouterUsesResponsesApi(modelID: string, ownedBy?: string) {
+  if (modelID.includes("-image")) return false
+  return ownedBy === "cx" || modelID.startsWith("cx/")
+}
+
 function nineRouterEntriesFromAuth(authInfo: Auth.Info | undefined) {
   if (authInfo?.type !== "api") return []
   const raw = authInfo.metadata?.[NINE_ROUTER_MODELS_METADATA]
@@ -1279,6 +1284,7 @@ function nineRouterEntriesFromAuth(authInfo: Auth.Info | undefined) {
 function nineRouterModel(entry: NineRouterModelEntry): Model {
   const imageGeneration = entry.ownedBy === "cx"
   const efforts = entry.effortLevels && entry.effortLevels.length > 0 ? entry.effortLevels : NINE_ROUTER_DEFAULT_EFFORTS
+  const useResponsesApi = nineRouterUsesResponsesApi(entry.id, entry.ownedBy)
   return {
     id: ModelID.make(entry.id),
     providerID: NINE_ROUTER_PROVIDER_ID,
@@ -1287,7 +1293,7 @@ function nineRouterModel(entry: NineRouterModelEntry): Model {
     api: {
       id: entry.id,
       url: NINE_ROUTER_BASE_URL,
-      npm: "@ai-sdk/openai-compatible",
+      npm: useResponsesApi ? "@ai-sdk/openai" : "@ai-sdk/openai-compatible",
     },
     status: "active",
     headers: {},
@@ -1544,7 +1550,9 @@ export const layer = Layer.effect(
             const apiID = model.id ?? existingModel?.api.id ?? modelID
             const apiNpm =
               model.provider?.npm ??
-              provider.npm ??
+              (providerID === NINE_ROUTER_PROVIDER_ID && nineRouterUsesResponsesApi(apiID, existingModel?.family)
+                ? "@ai-sdk/openai"
+                : provider.npm) ??
               existingModel?.api.npm ??
               modelsDev[providerID]?.npm ??
               "@ai-sdk/openai-compatible"
@@ -1860,6 +1868,9 @@ export const layer = Layer.effect(
 
         if (baseURL !== undefined) options["baseURL"] = baseURL
         if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
+        if (model.providerID === NINE_ROUTER_PROVIDER_ID && model.api.npm === "@ai-sdk/openai") {
+          options["apiKey"] ??= "local"
+        }
         if (model.headers)
           options["headers"] = {
             ...options["headers"],
