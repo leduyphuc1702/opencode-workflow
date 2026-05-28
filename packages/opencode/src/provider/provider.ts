@@ -41,7 +41,18 @@ const NINE_ROUTER_MODELS_FETCHED_AT_METADATA = "9router_models_fetched_at"
 type NineRouterModelEntry = {
   id: string
   ownedBy?: string
+  contextLimit?: number
+  inputLimit?: number
+  outputLimit?: number
+  reasoning?: boolean
+  releaseDate?: string
+  effortLevels?: string[]
 }
+
+const NINE_ROUTER_DEFAULT_CONTEXT_LIMIT = 200000
+const NINE_ROUTER_DEFAULT_OUTPUT_LIMIT = 0
+const NINE_ROUTER_DEFAULT_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"]
+const NINE_ROUTER_ALLOWED_EFFORTS = ["none", ...NINE_ROUTER_DEFAULT_EFFORTS]
 
 export class NineRouterModelsFetchError extends Schema.TaggedErrorClass<NineRouterModelsFetchError>()(
   "ProviderNineRouterModelsFetchError",
@@ -1192,9 +1203,49 @@ function nineRouterEntries(input: unknown): NineRouterModelEntry[] {
       {
         id: item.id,
         ...(typeof item.owned_by === "string" ? { ownedBy: item.owned_by } : {}),
+        ...(nineRouterLimit(item, ["context_length", "context_limit", "contextLimit"])
+          ? { contextLimit: nineRouterLimit(item, ["context_length", "context_limit", "contextLimit"]) }
+          : {}),
+        ...(nineRouterLimit(item, ["input_limit", "inputLimit"])
+          ? { inputLimit: nineRouterLimit(item, ["input_limit", "inputLimit"]) }
+          : {}),
+        ...(nineRouterLimit(item, ["output_limit", "outputLimit", "max_output_tokens"])
+          ? { outputLimit: nineRouterLimit(item, ["output_limit", "outputLimit", "max_output_tokens"]) }
+          : {}),
+        ...(typeof item.release_date === "string" ? { releaseDate: item.release_date } : {}),
+        ...(nineRouterEffortLevels(item.reasoning_effort_levels) ?
+          { effortLevels: nineRouterEffortLevels(item.reasoning_effort_levels) }
+        : {}),
+        ...(nineRouterSupportedReasoning(item.supported_parameters) ? { reasoning: true } : {}),
       },
     ]
   })
+}
+
+function nineRouterLimit(input: Record<string, unknown>, keys: string[]) {
+  return keys.map((key) => nineRouterPositiveNumber(input[key])).find((value) => value !== undefined)
+}
+
+function nineRouterPositiveNumber(input: unknown) {
+  const value = typeof input === "number" ? input : typeof input === "string" ? Number(input) : undefined
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return
+  return value
+}
+
+function nineRouterEffortLevels(input: unknown) {
+  if (!Array.isArray(input)) return
+  const efforts = input.filter(
+    (item): item is string => typeof item === "string" && NINE_ROUTER_ALLOWED_EFFORTS.includes(item),
+  )
+  if (efforts.length === 0) return
+  return efforts
+}
+
+function nineRouterSupportedReasoning(input: unknown) {
+  if (!Array.isArray(input)) return false
+  return input.some(
+    (item) => item === "reasoning" || item === "reasoning_effort" || item === "include_reasoning",
+  )
 }
 
 function nineRouterEntriesFromAuth(authInfo: Auth.Info | undefined) {
@@ -1211,6 +1262,12 @@ function nineRouterEntriesFromAuth(authInfo: Auth.Info | undefined) {
         {
           id: item.id,
           ...(typeof item.ownedBy === "string" ? { ownedBy: item.ownedBy } : {}),
+          ...(nineRouterPositiveNumber(item.contextLimit) ? { contextLimit: nineRouterPositiveNumber(item.contextLimit) } : {}),
+          ...(nineRouterPositiveNumber(item.inputLimit) ? { inputLimit: nineRouterPositiveNumber(item.inputLimit) } : {}),
+          ...(nineRouterPositiveNumber(item.outputLimit) ? { outputLimit: nineRouterPositiveNumber(item.outputLimit) } : {}),
+          ...(typeof item.releaseDate === "string" ? { releaseDate: item.releaseDate } : {}),
+          ...(nineRouterEffortLevels(item.effortLevels) ? { effortLevels: nineRouterEffortLevels(item.effortLevels) } : {}),
+          ...(typeof item.reasoning === "boolean" ? { reasoning: item.reasoning } : {}),
         },
       ]
     })
@@ -1221,6 +1278,7 @@ function nineRouterEntriesFromAuth(authInfo: Auth.Info | undefined) {
 
 function nineRouterModel(entry: NineRouterModelEntry): Model {
   const imageGeneration = entry.ownedBy === "cx"
+  const efforts = entry.effortLevels && entry.effortLevels.length > 0 ? entry.effortLevels : NINE_ROUTER_DEFAULT_EFFORTS
   return {
     id: ModelID.make(entry.id),
     providerID: NINE_ROUTER_PROVIDER_ID,
@@ -1243,20 +1301,20 @@ function nineRouterModel(entry: NineRouterModelEntry): Model {
       cache: { read: 0, write: 0 },
     },
     limit: {
-      context: 0,
-      output: 0,
+      context: entry.contextLimit ?? entry.inputLimit ?? NINE_ROUTER_DEFAULT_CONTEXT_LIMIT,
+      output: entry.outputLimit ?? NINE_ROUTER_DEFAULT_OUTPUT_LIMIT,
     },
     capabilities: {
       temperature: true,
-      reasoning: false,
+      reasoning: entry.reasoning ?? true,
       attachment: true,
       toolcall: true,
       input: { text: true, audio: false, image: true, video: false, pdf: false },
       output: { text: true, audio: false, image: imageGeneration, video: false, pdf: false },
       interleaved: false,
     },
-    release_date: "",
-    variants: {},
+    release_date: entry.releaseDate ?? "",
+    variants: Object.fromEntries(efforts.map((effort) => [effort, { reasoningEffort: effort }])),
   }
 }
 

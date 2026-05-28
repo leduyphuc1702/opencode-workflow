@@ -1844,6 +1844,76 @@ test("9router model normalization marks vision input and cx image generation", (
   })
 })
 
+test("9router model normalization uses rich metadata defaults", () => {
+  const models = Provider.nineRouterModels({ data: [{ id: "openai/gpt-5.5", owned_by: "openai" }] })
+  const model = models["openai/gpt-5.5"]
+
+  expect(model.limit.context).toBe(200000)
+  expect(model.limit.output).toBe(0)
+  expect(model.capabilities.reasoning).toBe(true)
+  expect(model.variants?.high.reasoningEffort).toBe("high")
+})
+
+test("9router model normalization parses rich metadata from models response", () => {
+  const models = Provider.nineRouterModels({
+    data: [
+      {
+        id: "openai/gpt-5.5",
+        owned_by: "openai",
+        context_length: "1000000",
+        output_limit: 32000,
+        release_date: "2026-05-28",
+        supported_parameters: ["temperature", "reasoning_effort"],
+        reasoning_effort_levels: ["low", "invalid", "high"],
+      },
+    ],
+  })
+  const model = models["openai/gpt-5.5"]
+
+  expect(model.limit.context).toBe(1000000)
+  expect(model.limit.output).toBe(32000)
+  expect(model.release_date).toBe("2026-05-28")
+  expect(model.capabilities.reasoning).toBe(true)
+  expect(model.variants).toEqual({
+    low: { reasoningEffort: "low" },
+    high: { reasoningEffort: "high" },
+  })
+})
+
+test("9router model normalization falls back for malformed metadata", () => {
+  const models = Provider.nineRouterModels({
+    data: [
+      {
+        id: "openai/gpt-5.5",
+        context_length: "nope",
+        output_limit: -1,
+        release_date: 123,
+        supported_parameters: "reasoning_effort",
+        reasoning_effort_levels: ["invalid"],
+      },
+    ],
+  })
+  const model = models["openai/gpt-5.5"]
+
+  expect(model.limit.context).toBe(200000)
+  expect(model.limit.output).toBe(0)
+  expect(model.release_date).toBe("")
+  expect(model.capabilities.reasoning).toBe(true)
+  expect(Object.keys(model.variants ?? {})).toEqual(["minimal", "low", "medium", "high", "xhigh", "max"])
+})
+
+test("9router model normalization filters effort levels", () => {
+  const models = Provider.nineRouterModels({
+    data: [{ id: "openai/gpt-5.5", reasoning_effort_levels: ["none", "minimal", "bogus", "max"] }],
+  })
+
+  expect(models["openai/gpt-5.5"].variants).toEqual({
+    none: { reasoningEffort: "none" },
+    minimal: { reasoningEffort: "minimal" },
+    max: { reasoningEffort: "max" },
+  })
+})
+
 it.instance("9router env key fetches models on provider load", () =>
   Effect.gen(function* () {
     const requests: { url: string; init?: RequestInit }[] = []
