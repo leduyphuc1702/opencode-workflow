@@ -21,7 +21,7 @@ type ModelState = ReturnType<typeof useLocal>["model"]
 type ModelListSource = Pick<ModelState, "current" | "list" | "set" | "visible">
 type ModelItem = Extract<ReturnType<ModelState["list"]>[number], { id: string; provider: { id: string; name: string } }>
 
-const ModelList: Component<{
+export const ModelList: Component<{
   provider?: string
   class?: string
   onSelect: () => void
