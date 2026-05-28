@@ -16,6 +16,14 @@ const codegraphBundle = path.join(
   "@colbymchenry",
   `codegraph-${process.platform}-${process.arch}`,
 )
+const openComputerUseBundle = path.join(rootDir, "packages", "desktop", "node_modules", "open-computer-use")
+const openComputerUseFilter = (() => {
+  const base = ["package.json", "LICENSE", "README.md"]
+  if (process.platform === "darwin") return ["dist/Open Computer Use.app/**", ...base]
+  if (process.platform === "linux") return [`dist/linux/${process.arch === "arm64" ? "arm64" : "amd64"}/**`, ...base]
+  if (process.platform === "win32") return [`dist/windows/${process.arch === "arm64" ? "arm64" : "amd64"}/**`, ...base]
+  return base
+})()
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
@@ -51,6 +59,11 @@ const getBase = (): Configuration => ({
       from: codegraphBundle,
       to: "codegraph/",
       filter: ["node", "node.exe", "bin/**", "lib/**", "package.json"],
+    },
+    {
+      from: openComputerUseBundle,
+      to: "open-computer-use/",
+      filter: openComputerUseFilter,
     },
   ],
   mac: {

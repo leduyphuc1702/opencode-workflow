@@ -127,6 +127,8 @@ const clearEffect = (wait = false) =>
 const clear = (wait = false) => Effect.runPromise(clearEffect(wait))
 // Get managed config directory from environment (set in preload.ts)
 const managedConfigDir = process.env.OPENCODE_TEST_MANAGED_CONFIG_DIR!
+const originalClient = process.env.OPENCODE_CLIENT
+const originalDesktopResourcesPath = process.env.OPENCODE_DESKTOP_RESOURCES_PATH
 const originalTestToken = process.env.TEST_TOKEN
 const originalConsoleToken = process.env.OPENCODE_CONSOLE_TOKEN
 
@@ -136,6 +138,10 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await fs.rm(managedConfigDir, { force: true, recursive: true }).catch(() => {})
+  if (originalClient === undefined) delete process.env.OPENCODE_CLIENT
+  else process.env.OPENCODE_CLIENT = originalClient
+  if (originalDesktopResourcesPath === undefined) delete process.env.OPENCODE_DESKTOP_RESOURCES_PATH
+  else process.env.OPENCODE_DESKTOP_RESOURCES_PATH = originalDesktopResourcesPath
   if (originalTestToken === undefined) delete process.env.TEST_TOKEN
   else process.env.TEST_TOKEN = originalTestToken
   if (originalConsoleToken === undefined) delete process.env.OPENCODE_CONSOLE_TOKEN
@@ -207,6 +213,45 @@ const withConfigTree = <A, E, R>(
     )
     return yield* withGlobalConfigDir(global, withInstanceDir(directory, effect))
   })
+
+function bundledOpenComputerUsePath(resourcesPath: string) {
+  if (process.platform === "darwin") {
+    return path.join(
+      resourcesPath,
+      "open-computer-use",
+      "dist",
+      "Open Computer Use.app",
+      "Contents",
+      "MacOS",
+      "OpenComputerUse",
+    )
+  }
+  if (process.platform === "linux") {
+    return path.join(
+      resourcesPath,
+      "open-computer-use",
+      "dist",
+      "linux",
+      process.arch === "arm64" ? "arm64" : "amd64",
+      "open-computer-use",
+    )
+  }
+  if (process.platform === "win32") {
+    return path.join(
+      resourcesPath,
+      "open-computer-use",
+      "dist",
+      "windows",
+      process.arch === "arm64" ? "arm64" : "amd64",
+      "open-computer-use.exe",
+    )
+  }
+}
+
+function useDesktopOpenComputerUseBundle(resourcesPath: string) {
+  process.env.OPENCODE_CLIENT = "desktop"
+  process.env.OPENCODE_DESKTOP_RESOURCES_PATH = resourcesPath
+}
 
 const wellKnown = (input: {
   authUrl?: string
@@ -1418,6 +1463,78 @@ it.instance("local .opencode config can override MCP from project config", () =>
     const config = yield* Config.use.get()
     expect(config.mcp?.docs?.enabled).toBe(true)
   }),
+)
+
+it.instance("desktop auto-configures bundled open-computer-use MCP", () =>
+  Effect.gen(function* () {
+    const resources = yield* tmpdirScoped()
+    const command = bundledOpenComputerUsePath(resources)
+    if (!command) return
+    yield* AppFileSystem.use.writeWithDirs(command, "")
+    useDesktopOpenComputerUseBundle(resources)
+
+    const config = yield* Config.use.get()
+    expect(config.mcp?.["open-computer-use"]).toEqual({
+      type: "local",
+      command: [command, "mcp"],
+      enabled: true,
+      timeout: 30_000,
+    })
+  }),
+)
+
+it.instance(
+  "desktop bundled open-computer-use MCP replaces global launcher config",
+  () =>
+    Effect.gen(function* () {
+      const resources = yield* tmpdirScoped()
+      const command = bundledOpenComputerUsePath(resources)
+      if (!command) return
+      yield* AppFileSystem.use.writeWithDirs(command, "")
+      useDesktopOpenComputerUseBundle(resources)
+
+      const config = yield* Config.use.get()
+      expect(config.mcp?.["open-computer-use"]).toEqual({
+        type: "local",
+        command: [command, "mcp"],
+        enabled: true,
+        timeout: 10_000,
+      })
+    }),
+  {
+    config: {
+      mcp: {
+        "open-computer-use": {
+          type: "local",
+          command: ["open-computer-use", "mcp"],
+          enabled: true,
+          timeout: 10_000,
+        },
+      },
+    },
+  },
+)
+
+it.instance(
+  "desktop bundled open-computer-use MCP does not override user config",
+  () =>
+    Effect.gen(function* () {
+      const resources = yield* tmpdirScoped()
+      const command = bundledOpenComputerUsePath(resources)
+      if (!command) return
+      yield* AppFileSystem.use.writeWithDirs(command, "")
+      useDesktopOpenComputerUseBundle(resources)
+
+      const config = yield* Config.use.get()
+      expect(config.mcp?.["open-computer-use"]).toEqual({ enabled: false })
+    }),
+  {
+    config: {
+      mcp: {
+        "open-computer-use": { enabled: false },
+      },
+    },
+  },
 )
 
 const remoteProjectOverride = wellKnown({

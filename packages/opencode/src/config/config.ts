@@ -45,6 +45,8 @@ import { Npm } from "@opencode-ai/core/npm"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 
 const log = Log.create({ service: "config" })
+const OPEN_COMPUTER_USE_MCP_KEY = "open-computer-use"
+const OPEN_COMPUTER_USE_MCP_TIMEOUT = 30_000
 
 // Custom merge function that concatenates array fields instead of replacing them
 // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
@@ -344,6 +346,80 @@ function globalConfigFile() {
     if (existsSync(file)) return file
   }
   return candidates[0]
+}
+
+function applyDesktopOpenComputerUseMCP(config: Info): Info {
+  const command = desktopOpenComputerUseCommand()
+  const current = config.mcp?.[OPEN_COMPUTER_USE_MCP_KEY]
+  if (!command || current?.enabled === false) return config
+  if (current && "type" in current && (current.type !== "local" || !isOpenComputerUseMCPCommand(current.command))) {
+    return config
+  }
+  return {
+    ...config,
+    mcp: {
+      ...(config.mcp ?? {}),
+      [OPEN_COMPUTER_USE_MCP_KEY]: {
+        ...(current ?? {}),
+        type: "local",
+        command: [command, "mcp"],
+        enabled: current?.enabled ?? true,
+        timeout: current && "timeout" in current ? current.timeout : OPEN_COMPUTER_USE_MCP_TIMEOUT,
+      },
+    },
+  }
+}
+
+function isOpenComputerUseMCPCommand(command: string[]) {
+  if (command.at(-1) !== "mcp") return false
+  return command.some((item) =>
+    ["open-computer-use", "open-computer-use-mcp", "OpenComputerUse"].includes(path.basename(item)),
+  )
+}
+
+function desktopOpenComputerUseCommand() {
+  if (process.env.OPENCODE_CLIENT !== "desktop") return
+  return [
+    process.env.OPENCODE_DESKTOP_RESOURCES_PATH,
+    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath,
+  ]
+    .filter((item): item is string => Boolean(item))
+    .map(openComputerUseExecutable)
+    .find((command): command is string => Boolean(command && existsSync(command)))
+}
+
+function openComputerUseExecutable(resourcesPath: string) {
+  if (process.platform === "darwin") {
+    return path.join(
+      resourcesPath,
+      "open-computer-use",
+      "dist",
+      "Open Computer Use.app",
+      "Contents",
+      "MacOS",
+      "OpenComputerUse",
+    )
+  }
+  if (process.platform === "linux") {
+    return path.join(
+      resourcesPath,
+      "open-computer-use",
+      "dist",
+      "linux",
+      process.arch === "arm64" ? "arm64" : "amd64",
+      "open-computer-use",
+    )
+  }
+  if (process.platform === "win32") {
+    return path.join(
+      resourcesPath,
+      "open-computer-use",
+      "dist",
+      "windows",
+      process.arch === "arm64" ? "arm64" : "amd64",
+      "open-computer-use.exe",
+    )
+  }
 }
 
 function patchJsonc(input: string, patch: unknown, path: string[] = []): string {
@@ -774,6 +850,8 @@ export const layer = Layer.effect(
         if (Flag.OPENCODE_DISABLE_PRUNE) {
           result.compaction = { ...result.compaction, prune: false }
         }
+
+        result = applyDesktopOpenComputerUseMCP(result)
 
         return {
           config: result,

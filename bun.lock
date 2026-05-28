@@ -265,6 +265,7 @@
         "electron-updater": "^6",
         "electron-window-state": "^5.0.3",
         "marked": "^15",
+        "open-computer-use": "0.1.51",
       },
       "devDependencies": {
         "@actions/artifact": "4.0.0",
@@ -4083,6 +4084,8 @@
     "oniguruma-to-es": ["oniguruma-to-es@4.3.5", "", { "dependencies": { "oniguruma-parser": "^0.12.1", "regex": "^6.1.0", "regex-recursion": "^6.0.2" } }, "sha512-Zjygswjpsewa0NLTsiizVuMQZbp0MDyM6lIt66OxsF21npUDlzpHi1Mgb/qhQdkb+dWFTzJmFbEWdvZgRho8eQ=="],
 
     "open": ["open@10.1.2", "", { "dependencies": { "default-browser": "^5.2.1", "define-lazy-prop": "^3.0.0", "is-inside-container": "^1.0.0", "is-wsl": "^3.1.0" } }, "sha512-cxN6aIDPz6rm8hbebcP7vrQNhvRcveZoJU72Y7vskh4oIm+BZwBECnx5nTmrlres1Qapvx27Qo1Auukpf8PKXw=="],
+
+    "open-computer-use": ["open-computer-use@0.1.51", "", { "bin": { "open-computer-use": "bin/open-computer-use", "open-computer-use-mcp": "bin/open-computer-use-mcp", "open-codex-computer-use-mcp": "bin/open-codex-computer-use-mcp" } }, "sha512-0Igj5SZRRsb6BjOycc2/3HohKOkYBR0TJB9KRk0yCoYMHogEuJcQVv/VWqlra5YbovvDlfFhqItCtkHbbb9ntw=="],
 
     "openai": ["openai@5.11.0", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.23.8" }, "optionalPeers": ["ws", "zod"], "bin": { "openai": "bin/cli" } }, "sha512-+AuTc5pVjlnTuA9zvn8rA/k+1RluPIx9AD4eDcnutv6JNwHHZxIhkFy+tmMKCvmMFDQzfA/r1ujvPWB19DQkYg=="],
 
