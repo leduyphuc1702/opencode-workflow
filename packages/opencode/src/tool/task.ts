@@ -20,6 +20,12 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
   resolvePromptParts(template: string): Effect.Effect<SessionPrompt.PromptInput["parts"]>
+  runtimeContextPrompt(
+    agent: string,
+    prompt: string,
+    model: UserAgentSettings.ModelRefInput,
+    settings: UserAgentSettings.Settings,
+  ): Effect.Effect<string>
   prompt(input: SessionPrompt.PromptInput): Effect.Effect<MessageV2.WithParts>
   loop(input: SessionPrompt.LoopInput): Effect.Effect<MessageV2.WithParts>
 }
@@ -188,12 +194,9 @@ export const TaskTool = Tool.define(
       const lastUser = yield* sessions
         .findMessage(ctx.sessionID, (item) => item.info.role === "user")
         .pipe(Effect.orDie)
-      const override =
-        Option.isSome(lastUser) && lastUser.value.info.role === "user"
-          ? UserAgentSettings.modelRef(
-              UserAgentSettings.read(lastUser.value.info).subagent_model_overrides?.[params.subagent_type],
-            )
-          : undefined
+      const settings: UserAgentSettings.Settings =
+        Option.isSome(lastUser) && lastUser.value.info.role === "user" ? UserAgentSettings.read(lastUser.value.info) : {}
+      const override = UserAgentSettings.modelRef(settings.subagent_model_overrides?.[params.subagent_type])
       const model = override ?? next.model ?? {
         modelID: msg.info.modelID,
         providerID: msg.info.providerID,
@@ -215,7 +218,11 @@ export const TaskTool = Tool.define(
       const runCancel = yield* EffectBridge.make()
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
-        const parts = yield* ops.resolvePromptParts(params.prompt)
+        const prompt =
+          next.name === "frontend-agent"
+            ? yield* ops.runtimeContextPrompt(next.name, params.prompt, model, settings)
+            : params.prompt
+        const parts = yield* ops.resolvePromptParts(prompt)
         const result = yield* ops.prompt({
           messageID: MessageID.ascending(),
           sessionID: nextSession.id,

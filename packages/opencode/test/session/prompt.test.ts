@@ -294,6 +294,33 @@ function providerCfg(url: string) {
   }
 }
 
+function providerCfgWithImage(url: string) {
+  const base = providerCfg(url)
+  return {
+    ...base,
+    provider: {
+      ...base.provider,
+      test: {
+        ...base.provider.test,
+        models: {
+          ...base.provider.test.models,
+          "image-model": {
+            name: "Image Model",
+            modalities: { input: ["text" as const], output: ["image" as const] },
+            options: { imageGeneration: { endpoint: "http://images.example/v1" } },
+          },
+        },
+      },
+    },
+    agent: {
+      "frontend-agent": {
+        description: "Frontend agent",
+        mode: "subagent" as const,
+      },
+    },
+  }
+}
+
 const writeText = Effect.fn("test.writeText")(function* (file: string, text: string) {
   const fs = yield* AppFileSystem.Service
   yield* fs.writeWithDirs(file, text)
@@ -414,7 +441,7 @@ const seed = Effect.fn("test.seed")(function* (sessionID: SessionID, opts?: { fi
   return { user: msg, assistant }
 })
 
-const addSubtask = (sessionID: SessionID, messageID: MessageID, model = ref) =>
+const addSubtask = (sessionID: SessionID, messageID: MessageID, model = ref, agent = "general") =>
   Effect.gen(function* () {
     const session = yield* Session.Service
     yield* session.updatePart({
@@ -424,10 +451,26 @@ const addSubtask = (sessionID: SessionID, messageID: MessageID, model = ref) =>
       type: "subtask",
       prompt: "look into the cache key path",
       description: "inspect bug",
-      agent: "general",
+      agent,
       model,
     })
   })
+
+const captureTaskPrompts = Effect.fn("test.captureTaskPrompts")(function* (captured: string[]) {
+  const registry = yield* ToolRegistry.Service
+  const { task } = yield* registry.named()
+  const original = task.execute
+  task.execute = (args, ctx) =>
+    Effect.sync(() => {
+      captured.push(args.prompt)
+      return {
+        title: args.description,
+        metadata: { parentSessionId: ctx.sessionID, sessionId: SessionID.make("ses_captured"), model: ref },
+        output: "done",
+      }
+    })
+  yield* Effect.addFinalizer(() => Effect.sync(() => void (task.execute = original)))
+})
 
 const boot = Effect.fn("test.boot")(function* (input?: { title?: string }) {
   const config = yield* Config.Service
@@ -712,6 +755,74 @@ it.instance("loop continues when finish is stop but assistant has tool parts", (
       expect(result.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
       expect(result.info.finish).toBe("stop")
     }
+  }),
+)
+
+it.instance("subtask runtime context pins model override for non-frontend agents", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const captured: string[] = []
+    yield* captureTaskPrompts(captured)
+    yield* llm.text("done")
+    const msg = yield* user(chat.id, "hello")
+    yield* addSubtask(chat.id, msg.id)
+
+    yield* prompt.loop({ sessionID: chat.id })
+
+    expect(captured).toEqual([
+      [
+        "<subagent_runtime_context>",
+        "modelOverride: test/test-model",
+        "</subagent_runtime_context>",
+        "",
+        "look into the cache key path",
+      ].join("\n"),
+    ])
+  }),
+)
+
+it.instance("subtask runtime context includes image generation model for frontend-agent", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfgWithImage)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const captured: string[] = []
+    yield* captureTaskPrompts(captured)
+    yield* llm.text("done")
+    const msg = yield* sessions.updateMessage({
+      id: MessageID.ascending(),
+      role: "user",
+      sessionID: chat.id,
+      agent: "build",
+      model: ref,
+      system: JSON.stringify({ user_agent_settings: { frontend_image_model: "test/image-model" } }),
+      time: { created: Date.now() },
+    })
+    yield* sessions.updatePart({
+      id: PartID.ascending(),
+      messageID: msg.id,
+      sessionID: chat.id,
+      type: "text",
+      text: "hello",
+    })
+    yield* addSubtask(chat.id, msg.id, ref, "frontend-agent")
+
+    yield* prompt.loop({ sessionID: chat.id })
+
+    expect(captured).toEqual([
+      [
+        "<subagent_runtime_context>",
+        "modelOverride: test/test-model",
+        "imageGenerationModel: test/image-model",
+        "</subagent_runtime_context>",
+        "",
+        "look into the cache key path",
+      ].join("\n"),
+    ])
   }),
 )
 

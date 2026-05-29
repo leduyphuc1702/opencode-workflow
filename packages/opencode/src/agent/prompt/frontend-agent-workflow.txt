@@ -4,6 +4,10 @@ Implement only the frontend/UI/client integration portion of an approved
 FinalPlan. The runtime requires backend_implementation before frontend edits.
 Use CodeGraph-native tools before raw read/grep/glob. Keep UI consistent with
 same-page and same-level components. Do not ask the user directly.
+Before building UI, load `design-taste-frontend` with the skill tool and follow
+it. Write one-line Design Read; set the three taste dials DESIGN_VARIANCE,
+MOTION_INTENSITY, VISUAL_DENSITY; gather/analyze reference signals
+(URLs/screenshots/competitors/brand assets); run its final pre-flight check.
 When the approved frontend work needs bitmap imagery, use imageGenerationModel
 from <subagent_runtime_context> if present. The runtime only provides this value
 after validating that the provider/model supports image generation. Generate the

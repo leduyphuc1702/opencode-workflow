@@ -16,6 +16,7 @@ import * as Log from "@opencode-ai/core/util/log"
 import { Discovery } from "./discovery"
 import CUSTOMIZE_OPENCODE_SKILL_BODY from "./prompt/customize-opencode.md" with { type: "text" }
 import OPENCODE_WORKFLOW_SKILL_BODY from "./prompt/opencode-workflow.md" with { type: "text" }
+import DESIGN_TASTE_FRONTEND_SKILL_BODY from "./prompt/taste-skill.md" with { type: "text" }
 import { isRecord } from "@/util/record"
 
 const log = Log.create({ service: "skill" })
@@ -36,6 +37,12 @@ const CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION =
 const OPENCODE_WORKFLOW_SKILL_NAME = "opencode-workflow"
 const OPENCODE_WORKFLOW_SKILL_DESCRIPTION =
   "Use when running the bundled opencode-workflow orchestrator: CodeGraph-first codebase understanding, design-before-implementation approval gates, task-scoped remote skills, and sub-agent break/resume."
+// Vendored from github.com/Leonxlnx/taste-skill at commit
+// 3c7017d636c3a4aad378433ea6d0cfa6c921da4a under the MIT License,
+// Copyright (c) 2026 Leonxlnx.
+const DESIGN_TASTE_FRONTEND_SKILL_NAME = "design-taste-frontend"
+const DESIGN_TASTE_FRONTEND_SKILL_DESCRIPTION =
+  "Anti-slop frontend skill for landing pages, portfolios, and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated. Real design systems when applicable, audit-first on redesigns, strict pre-flight check."
 
 export const Info = Schema.Struct({
   name: Schema.String,
@@ -316,6 +323,13 @@ export const layer = Layer.effect(
           description: OPENCODE_WORKFLOW_SKILL_DESCRIPTION,
           location: "<built-in>",
           content: OPENCODE_WORKFLOW_SKILL_BODY,
+          source: "built-in",
+        }
+        s.skills[DESIGN_TASTE_FRONTEND_SKILL_NAME] = {
+          name: DESIGN_TASTE_FRONTEND_SKILL_NAME,
+          description: DESIGN_TASTE_FRONTEND_SKILL_DESCRIPTION,
+          location: "<built-in>",
+          content: DESIGN_TASTE_FRONTEND_SKILL_BODY,
           source: "built-in",
         }
         yield* loadSkills(s, yield* InstanceState.get(discovered), bus)

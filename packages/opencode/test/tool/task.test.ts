@@ -84,10 +84,18 @@ const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned", system?
   return { chat, assistant }
 })
 
-function stubOps(opts?: { onPrompt?: (input: SessionPrompt.PromptInput) => void; text?: string }): TaskPromptOps {
+function stubOps(opts?: {
+  onPrompt?: (input: SessionPrompt.PromptInput) => void
+  runtimeContextPrompt?: TaskPromptOps["runtimeContextPrompt"]
+  text?: string
+}): TaskPromptOps {
   return {
     cancel: () => Effect.void,
     resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+    runtimeContextPrompt: (agent, prompt, model, settings) =>
+      opts?.runtimeContextPrompt
+        ? opts.runtimeContextPrompt(agent, prompt, model, settings)
+        : Effect.succeed(prompt),
     prompt: (input) =>
       Effect.sync(() => {
         opts?.onPrompt?.(input)
@@ -284,6 +292,7 @@ describe("tool.task", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        runtimeContextPrompt: (_agent, prompt) => Effect.succeed(prompt),
         prompt: (input) =>
           Effect.succeed(
             replyWithParts(input, (id) => [
@@ -393,6 +402,7 @@ describe("tool.task", () => {
             cancelled.resolve(sessionID)
           }),
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        runtimeContextPrompt: (_agent, prompt) => Effect.succeed(prompt),
         prompt: (input) =>
           Effect.promise(() => {
             ready.resolve(input)
@@ -538,6 +548,69 @@ describe("tool.task", () => {
       expect(seen?.model).toEqual(ref)
       expect(result.metadata.model).toEqual(ref)
     }),
+  )
+
+  it.instance(
+    "execute wraps frontend-agent prompts with runtime context only",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        const seen: Record<string, string | undefined> = {}
+        const wrapped: string[] = []
+        const promptOps = stubOps({
+          onPrompt: (input) => {
+            seen[input.agent ?? ""] = input.parts.find((part) => part.type === "text")?.text
+          },
+          runtimeContextPrompt: (agent, prompt) =>
+            Effect.sync(() => {
+              wrapped.push(agent)
+              return `<<rtctx>>\n${prompt}`
+            }),
+        })
+        const ctx = {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        }
+
+        yield* def.execute(
+          {
+            description: "build page",
+            prompt: "build a pricing page",
+            subagent_type: "frontend-agent",
+          },
+          ctx,
+        )
+        yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "general",
+          },
+          ctx,
+        )
+
+        expect(wrapped).toEqual(["frontend-agent"])
+        expect(seen["frontend-agent"]).toBe("<<rtctx>>\nbuild a pricing page")
+        expect(seen.general).toBe("look into the cache key path")
+      }),
+    {
+      config: {
+        agent: {
+          "frontend-agent": {
+            description: "Frontend agent",
+            mode: "subagent" as const,
+          },
+        },
+      },
+    },
   )
 
   it.instance(

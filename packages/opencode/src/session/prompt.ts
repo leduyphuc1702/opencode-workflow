@@ -134,6 +134,12 @@ export const layer = Layer.effect(
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
         resolvePromptParts: (template: string) => resolvePromptParts(template),
+        runtimeContextPrompt: (
+          agent: string,
+          prompt: string,
+          model: UserAgentSettings.ModelRefInput,
+          settings: UserAgentSettings.Settings,
+        ) => runtimeContextPrompt(agent, prompt, model, settings),
         prompt: (input: PromptInput) => prompt(input).pipe(Effect.catch(Effect.die)),
         loop: (input: LoopInput) => loop(input),
       } satisfies TaskPromptOps
@@ -507,13 +513,27 @@ export const layer = Layer.effect(
       model: Provider.Model,
       settings: UserAgentSettings.Settings,
     ) {
-      const context = [`modelOverride: ${model.providerID}/${model.id}`]
-      if (task.agent === "frontend-agent") {
+      return yield* runtimeContextPrompt(
+        task.agent,
+        task.prompt,
+        { providerID: model.providerID, modelID: model.id },
+        settings,
+      )
+    })
+
+    const runtimeContextPrompt = Effect.fn("SessionPrompt.runtimeContextPrompt")(function* (
+      agent: string,
+      prompt: string,
+      model: UserAgentSettings.ModelRefInput,
+      settings: UserAgentSettings.Settings,
+    ) {
+      const context = [`modelOverride: ${model.providerID}/${model.modelID}`]
+      if (agent === "frontend-agent") {
         const imageGenerationModel = yield* frontendImageGenerationModel(UserAgentSettings.modelRef(settings.frontend_image_model))
         if (imageGenerationModel)
           context.push(`imageGenerationModel: ${imageGenerationModel.providerID}/${imageGenerationModel.id}`)
       }
-      return [`<subagent_runtime_context>`, ...context, `</subagent_runtime_context>`, "", task.prompt].join("\n")
+      return [`<subagent_runtime_context>`, ...context, `</subagent_runtime_context>`, "", prompt].join("\n")
     })
 
     const frontendImageGenerationModel = Effect.fn("SessionPrompt.frontendImageGenerationModel")(function* (configured?: UserAgentSettings.ModelRefInput) {
