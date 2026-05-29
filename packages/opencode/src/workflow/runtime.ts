@@ -570,9 +570,16 @@ function isCommitCommand(args: unknown) {
 }
 
 function isCommitWorkflowCommand(args: unknown) {
-  return /^\s*(?:git\s+add\b[^\n;&|<>]*|(?:git|jj)\s+commit\b[^\n;&|<>]*|git\s+add\b[^\n;&|<>]*&&\s*(?:git|jj)\s+commit\b[^\n;&|<>]*)\s*$/.test(
-    shellCommand(args),
-  )
+  const command = shellCommand(args).trim()
+  if (!command || /[;|<>\n]/.test(command)) return false
+  return command.split(/\s*&&\s*/).every((part) => isCommitWorkflowPart(part.trim()))
+}
+
+function isCommitWorkflowPart(command: string) {
+  if (/^git\s+add\b/.test(command)) return true
+  if (/^(?:git|jj)\s+commit\b/.test(command)) return true
+  if (/^git\s+(?:--no-pager\s+)?status\b/.test(command)) return true
+  return /^git\s+(?:--no-pager\s+)?diff\b/.test(command) && /\s--(?:cached|staged)\b/.test(command)
 }
 
 function isLikelyMutatingShell(args: unknown) {

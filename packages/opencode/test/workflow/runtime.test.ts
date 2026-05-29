@@ -407,6 +407,13 @@ describe("workflow.runtime", () => {
         currentSessionID: sessionID,
         agent: "orchestrator-agent",
         tool: "bash",
+        args: { command: "git add src/server.ts src/client.tsx && git --no-pager diff --cached --stat" },
+      })
+      yield* runtime.beforeTool({
+        workflowSessionID: sessionID,
+        currentSessionID: sessionID,
+        agent: "orchestrator-agent",
+        tool: "bash",
         args: { command: 'git add src/server.ts src/client.tsx && git commit -m "test"' },
       })
 
