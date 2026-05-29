@@ -2,6 +2,7 @@ import path from "path"
 import os from "os"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
+import { UserAgentSettings } from "./user-agent-settings"
 import * as Log from "@opencode-ai/core/util/log"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
@@ -313,8 +314,8 @@ export const layer = Layer.effect(
       const ctx = yield* InstanceState.context
       const promptOps = yield* ops()
       const { task: taskTool } = yield* registry.named()
-      const settings = userAgentSettings(lastUser)
-      const overrideModel = modelRefFromSettings(settings.subagent_model_overrides?.[task.agent])
+      const settings = UserAgentSettings.read(lastUser)
+      const overrideModel = UserAgentSettings.modelRef(settings.subagent_model_overrides?.[task.agent])
       const taskModel = overrideModel
         ? yield* getModel(overrideModel.providerID, overrideModel.modelID, sessionID)
         : task.model
@@ -504,18 +505,18 @@ export const layer = Layer.effect(
     const subtaskPromptWithRuntimeContext = Effect.fn("SessionPrompt.subtaskPromptWithRuntimeContext")(function* (
       task: MessageV2.SubtaskPart,
       model: Provider.Model,
-      settings: UserAgentSettings,
+      settings: UserAgentSettings.Settings,
     ) {
       const context = [`modelOverride: ${model.providerID}/${model.id}`]
       if (task.agent === "frontend-agent") {
-        const imageGenerationModel = yield* frontendImageGenerationModel(modelRefFromSettings(settings.frontend_image_model))
+        const imageGenerationModel = yield* frontendImageGenerationModel(UserAgentSettings.modelRef(settings.frontend_image_model))
         if (imageGenerationModel)
           context.push(`imageGenerationModel: ${imageGenerationModel.providerID}/${imageGenerationModel.id}`)
       }
       return [`<subagent_runtime_context>`, ...context, `</subagent_runtime_context>`, "", task.prompt].join("\n")
     })
 
-    const frontendImageGenerationModel = Effect.fn("SessionPrompt.frontendImageGenerationModel")(function* (configured?: ModelRefInput) {
+    const frontendImageGenerationModel = Effect.fn("SessionPrompt.frontendImageGenerationModel")(function* (configured?: UserAgentSettings.ModelRefInput) {
       if (configured) {
         const selected = yield* provider
           .getModel(configured.providerID, configured.modelID)
@@ -1717,40 +1718,6 @@ export const defaultLayer = Layer.suspend(() =>
     ),
   ),
 )
-
-type ModelRefInput = { providerID: ProviderID; modelID: ModelID }
-type UserAgentSettings = {
-  subagent_model_overrides?: Record<string, ModelRefInput | string>
-  frontend_image_model?: ModelRefInput | string
-}
-
-function userAgentSettings(lastUser: MessageV2.User): UserAgentSettings {
-  if (!lastUser.system) return {}
-  return parseUserAgentSettings(lastUser.system)
-}
-
-function parseUserAgentSettings(text: string): UserAgentSettings {
-  const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(text)
-  if (Option.isNone(parsed)) return {}
-  return normalizeUserAgentSettings(parsed.value)
-}
-
-function normalizeUserAgentSettings(value: unknown): UserAgentSettings {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
-  if ("user_agent_settings" in value) return normalizeUserAgentSettings(value.user_agent_settings)
-  return value as UserAgentSettings
-}
-
-function modelRefFromSettings(value: ModelRefInput | string | undefined): ModelRefInput | undefined {
-  if (!value) return
-  if (typeof value === "string") {
-    const [providerID, ...model] = value.split("/")
-    if (!providerID || model.length === 0) return
-    return { providerID: ProviderID.make(providerID), modelID: ModelID.make(model.join("/")) }
-  }
-  if (!value.providerID || !value.modelID) return
-  return value
-}
 
 const ModelRef = Schema.Struct({
   providerID: ProviderID,

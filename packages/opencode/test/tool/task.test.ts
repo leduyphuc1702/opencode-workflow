@@ -54,7 +54,7 @@ function defer<T>() {
   return { promise, resolve }
 }
 
-const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
+const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned", system?: string) {
   const session = yield* Session.Service
   const chat = yield* session.create({ title })
   const user = yield* session.updateMessage({
@@ -64,6 +64,7 @@ const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
     agent: "build",
     model: ref,
     time: { created: Date.now() },
+    ...(system ? { system } : {}),
   })
   const assistant: MessageV2.Assistant = {
     id: MessageID.ascending(),
@@ -463,6 +464,79 @@ describe("tool.task", () => {
       expect(result.metadata.sessionId).not.toBe("ses_missing")
       expect(result.output).toContain(`task_id: ${result.metadata.sessionId}`)
       expect(seen?.sessionID).toBe(result.metadata.sessionId)
+    }),
+  )
+
+  it.instance("execute applies subagent model override from user agent settings", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed(
+        "Pinned",
+        JSON.stringify({
+          user_agent_settings: { subagent_model_overrides: { general: "override-prov/override-model" } },
+        }),
+      )
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let seen: SessionPrompt.PromptInput | undefined
+      const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+      const result = yield* def.execute(
+        {
+          description: "inspect bug",
+          prompt: "look into the cache key path",
+          subagent_type: "general",
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(seen?.model).toEqual({
+        providerID: ProviderID.make("override-prov"),
+        modelID: ModelID.make("override-model"),
+      })
+      expect(result.metadata.model).toEqual({
+        providerID: ProviderID.make("override-prov"),
+        modelID: ModelID.make("override-model"),
+      })
+    }),
+  )
+
+  it.instance("execute falls back to the parent model without a subagent override", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let seen: SessionPrompt.PromptInput | undefined
+      const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+      const result = yield* def.execute(
+        {
+          description: "inspect bug",
+          prompt: "look into the cache key path",
+          subagent_type: "general",
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(seen?.model).toEqual(ref)
+      expect(result.metadata.model).toEqual(ref)
     }),
   )
 

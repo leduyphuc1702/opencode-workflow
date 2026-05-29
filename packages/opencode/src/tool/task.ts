@@ -6,6 +6,7 @@ import { Bus } from "@/bus"
 import { Session } from "@/session/session"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
+import { UserAgentSettings } from "../session/user-agent-settings"
 import { Agent } from "../agent/agent"
 import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import type { SessionPrompt } from "../session/prompt"
@@ -184,7 +185,16 @@ export const TaskTool = Tool.define(
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(Effect.orDie)
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
 
-      const model = next.model ?? {
+      const lastUser = yield* sessions
+        .findMessage(ctx.sessionID, (item) => item.info.role === "user")
+        .pipe(Effect.orDie)
+      const override =
+        Option.isSome(lastUser) && lastUser.value.info.role === "user"
+          ? UserAgentSettings.modelRef(
+              UserAgentSettings.read(lastUser.value.info).subagent_model_overrides?.[params.subagent_type],
+            )
+          : undefined
+      const model = override ?? next.model ?? {
         modelID: msg.info.modelID,
         providerID: msg.info.providerID,
       }
