@@ -284,11 +284,15 @@ export const layer = Layer.effect(
         if (blocker) return yield* Effect.fail(new Error(blocker))
       }
 
-      if (input.tool === "bash" && isCommitCommand(input.args) && !record.commitApprovedAt) {
+      const commitApproved = currentCommitApproved(record)
+
+      if (input.tool === "bash" && isCommitCommand(input.args) && !commitApproved) {
         return yield* Effect.fail(
           new Error("Workflow commit gate blocked git commit. Use workflow_approve_commit after done approval."),
         )
       }
+
+      if (input.tool === "bash" && commitApproved && isCommitWorkflowCommand(input.args)) return {}
 
       if (mutatingTools.has(input.tool) || (input.tool === "bash" && isLikelyMutatingShell(input.args))) {
         const blocker = mutationBlocker(record, input)
@@ -479,6 +483,10 @@ function currentPlanApproved(record: Record) {
   return !!record.finalPlanApprovedAt && record.approvedPlan?.cycle === (record.cycle ?? 0)
 }
 
+function currentCommitApproved(record: Record) {
+  return !!record.commitApprovedAt && hasCurrentArtifact(record, "commit_approval")
+}
+
 function stateAfterArtifact(kind: WorkflowArtifactKind, reviewStatus?: WorkflowReviewStatus): WorkflowState {
   if (kind === "intake_spec") return "exploring"
   if (kind === "scope_decision") return "planning"
@@ -559,6 +567,12 @@ function shellCommand(args: unknown) {
 
 function isCommitCommand(args: unknown) {
   return /(^|[;&|]\s*)(git|jj)\s+commit\b/.test(shellCommand(args))
+}
+
+function isCommitWorkflowCommand(args: unknown) {
+  return /^\s*(?:git\s+add\b[^\n;&|<>]*|(?:git|jj)\s+commit\b[^\n;&|<>]*|git\s+add\b[^\n;&|<>]*&&\s*(?:git|jj)\s+commit\b[^\n;&|<>]*)\s*$/.test(
+    shellCommand(args),
+  )
 }
 
 function isLikelyMutatingShell(args: unknown) {

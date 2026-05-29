@@ -251,7 +251,7 @@ export const WorkflowApproveCommitTool = Tool.define<typeof ApprovalParameters, 
     const sessions = yield* Session.Service
 
     return {
-      description: "Ask the user to approve committing after SOL done approval.",
+      description: "Ask the user to approve staging and committing after SOL done approval.",
       parameters: ApprovalParameters,
       execute: (params, ctx) =>
         Effect.gen(function* () {
@@ -265,7 +265,7 @@ export const WorkflowApproveCommitTool = Tool.define<typeof ApprovalParameters, 
                 question: "Commit the approved changes?",
                 custom: true,
                 options: [
-                  { label: "Commit", description: "Unlock git commit commands for this workflow." },
+                  { label: "Commit", description: "Unlock git add and git commit commands for this workflow." },
                   { label: "Skip", description: "Do not commit now." },
                 ],
               },
@@ -276,7 +276,7 @@ export const WorkflowApproveCommitTool = Tool.define<typeof ApprovalParameters, 
             return {
               title: "Commit not approved",
               metadata: { state: record.state },
-              output: "User did not approve committing. Git commit commands remain blocked.",
+              output: "User did not approve committing. Git add and git commit commands remain blocked.",
             }
           }
           const result = yield* runtime.approveCommit({
@@ -288,7 +288,7 @@ export const WorkflowApproveCommitTool = Tool.define<typeof ApprovalParameters, 
           return {
             title: "Commit approved",
             metadata: { state: result.record.state, evidenceID: result.evidenceID },
-            output: `Commit approved. Git commit commands are unlocked. Approval evidence: ${result.evidenceID}`,
+            output: `Commit approved. Git add and git commit commands are unlocked. Approval evidence: ${result.evidenceID}`,
           }
         }).pipe(Effect.orDie),
     }

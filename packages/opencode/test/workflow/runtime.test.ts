@@ -349,6 +349,80 @@ describe("workflow.runtime", () => {
     }),
   )
 
+  it.effect("allows commit staging after commit approval in full workflow", () =>
+    Effect.gen(function* () {
+      const runtime = yield* WorkflowRuntime.Service
+      const sessionID = id("commit-stage")
+
+      yield* runtime.recordArtifact({
+        sessionID,
+        agent: "plan-finalizer",
+        kind: "final_plan",
+        summary: "full",
+        expectedChangedFiles: ["src/server.ts", "src/client.tsx"],
+      })
+      yield* runtime.approveFinalPlan({ sessionID, agent: "orchestrator-agent", plan: "FinalPlan" })
+      yield* runtime.recordArtifact({
+        sessionID,
+        agent: "backend-agent",
+        kind: "backend_implementation",
+        summary: "backend done",
+      })
+      yield* runtime.recordArtifact({
+        sessionID,
+        agent: "frontend-agent",
+        kind: "frontend_implementation",
+        summary: "frontend done",
+      })
+      yield* runtime.recordArtifact({
+        sessionID,
+        agent: "code-reviewer",
+        kind: "code_review",
+        summary: "clean",
+        reviewStatus: "no_findings",
+      })
+      yield* runtime.approveDone({ sessionID, agent: "orchestrator-agent", summary: "done" })
+
+      const blocked = yield* runtime
+        .beforeTool({
+          workflowSessionID: sessionID,
+          currentSessionID: sessionID,
+          agent: "orchestrator-agent",
+          tool: "bash",
+          args: { command: "git add src/server.ts src/client.tsx" },
+        })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(blocked)).toBe(true)
+
+      yield* runtime.approveCommit({ sessionID, agent: "orchestrator-agent", summary: "commit" })
+      yield* runtime.beforeTool({
+        workflowSessionID: sessionID,
+        currentSessionID: sessionID,
+        agent: "orchestrator-agent",
+        tool: "bash",
+        args: { command: "git add src/server.ts src/client.tsx" },
+      })
+      yield* runtime.beforeTool({
+        workflowSessionID: sessionID,
+        currentSessionID: sessionID,
+        agent: "orchestrator-agent",
+        tool: "bash",
+        args: { command: 'git add src/server.ts src/client.tsx && git commit -m "test"' },
+      })
+
+      const blockedExtraMutation = yield* runtime
+        .beforeTool({
+          workflowSessionID: sessionID,
+          currentSessionID: sessionID,
+          agent: "orchestrator-agent",
+          tool: "bash",
+          args: { command: "git add src/server.ts && rm src/client.tsx" },
+        })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(blockedExtraMutation)).toBe(true)
+    }),
+  )
+
   it.effect("records raw fallback evidence before graph evidence", () =>
     Effect.gen(function* () {
       const runtime = yield* WorkflowRuntime.Service
