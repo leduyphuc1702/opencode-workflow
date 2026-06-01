@@ -1777,6 +1777,7 @@ function InlineTool(props: {
   complete: any
   pending: string
   spinner?: boolean
+  subagent?: boolean
   children: JSX.Element
   part: ToolPart
   onClick?: () => void
@@ -1817,6 +1818,7 @@ function InlineTool(props: {
 
   return (
     <InlineToolRow
+      id={`tool-inline-${props.subagent ? "subagent-" : ""}${props.part.id}`}
       icon={props.icon}
       iconColor={props.iconColor}
       color={fg()}
@@ -1828,6 +1830,7 @@ function InlineTool(props: {
       complete={props.complete}
       pending={props.pending}
       spinner={props.spinner}
+      subagent={props.subagent}
       separateAfter={(id) =>
         sync.data.message[ctx.sessionID]?.some((message) => message.role === "user" && message.id === id) ?? false
       }
@@ -1848,6 +1851,7 @@ function InlineTool(props: {
 }
 
 export function InlineToolRow(props: {
+  id?: string
   icon: string
   iconColor?: RGBA
   color?: RGBA
@@ -1859,6 +1863,7 @@ export function InlineToolRow(props: {
   complete: any
   pending: string
   spinner?: boolean
+  subagent?: boolean
   children: JSX.Element
   separateAfter?: (id: string | undefined) => boolean
   onMouseOver?: () => void
@@ -1869,6 +1874,7 @@ export function InlineToolRow(props: {
 
   return (
     <box
+      id={props.id}
       marginTop={margin()}
       paddingLeft={3}
       onMouseOver={props.onMouseOver}
@@ -1883,9 +1889,12 @@ export function InlineToolRow(props: {
         const children = parent.getChildren()
         const index = children.indexOf(el)
         const previous = children[index - 1]
+        const previousInline = previous?.id.startsWith("tool-inline-") ?? false
+        const previousSubagent = previous?.id.startsWith("tool-inline-subagent-") ?? false
         setMargin(
           previous?.id.startsWith("text-") ||
             previous?.id.startsWith("tool-block-") ||
+            (previousInline && previousSubagent !== Boolean(props.subagent)) ||
             props.separateAfter?.(previous?.id)
             ? 1
             : 0,
@@ -2111,8 +2120,8 @@ function Read(props: ToolProps<typeof ReadTool>) {
         Read {pathFormatter.format(props.input.filePath)} {input(props.input, ["filePath"])}
       </InlineTool>
       <For each={loaded()}>
-        {(filepath) => (
-          <box paddingLeft={3}>
+        {(filepath, index) => (
+          <box id={`tool-inline-loaded-${props.part.id}-${index()}`} paddingLeft={3}>
             <text paddingLeft={3} fg={theme.textMuted}>
               ↳ Loaded {pathFormatter.format(filepath)}
             </text>
@@ -2178,11 +2187,14 @@ function Task(props: ToolProps<typeof TaskTool>) {
     tools().findLast((x) => (x.state.status === "running" || x.state.status === "completed") && x.state.title),
   )
 
-  const isRunning = createMemo(() => props.part.state.status === "running")
+  const status = createMemo(() => sync.data.session_status[props.metadata.sessionId ?? ""])
+  const isRunning = createMemo(
+    () => props.part.state.status === "running" || (props.metadata.background === true && status() !== undefined),
+  )
   const retry = createMemo(() => {
-    const status = sync.data.session_status[props.metadata.sessionId ?? ""]
-    if (status?.type !== "retry") return
-    return status
+    const value = status()
+    if (value?.type !== "retry") return
+    return value
   })
 
   const duration = createMemo(() => {
@@ -2202,20 +2214,15 @@ function Task(props: ToolProps<typeof TaskTool>) {
     if (isRunning() && retrying) {
       content.push(`↳ ${Locale.truncate(retrying.message, 80)} [retrying attempt #${retrying.attempt}]`)
     } else if (isRunning() && tools().length > 0) {
-      // content[0] += ` · ${tools().length} toolcalls`
       if (current()) {
         const state = current()!.state
         const title = state.status === "running" || state.status === "completed" ? state.title : undefined
         content.push(`↳ ${Locale.titlecase(current()!.tool)} ${title}`)
-      } else content.push(`↳ ${tools().length} toolcalls`)
+      } else content.push(`↳ ${formatSubagentToolcalls(tools().length)}`)
     }
 
-    if (props.part.state.status === "completed") {
-      content.push(
-        props.metadata.background === true
-          ? `└ ${tools().length} toolcalls`
-          : `└ ${tools().length} toolcalls · ${Locale.duration(duration())}`,
-      )
+    if (!isRunning() && props.part.state.status === "completed") {
+      content.push(`↳ ${formatCompletedSubagentDetail(tools().length, Locale.duration(duration()))}`)
     }
 
     return content.join("\n")
@@ -2223,7 +2230,8 @@ function Task(props: ToolProps<typeof TaskTool>) {
 
   return (
     <InlineTool
-      icon="│"
+      icon={props.part.state.status === "completed" ? "✓" : "│"}
+      subagent={true}
       color={retry() ? theme.error : undefined}
       spinner={isRunning()}
       complete={props.input.description}
@@ -2240,6 +2248,15 @@ function Task(props: ToolProps<typeof TaskTool>) {
       {content()}
     </InlineTool>
   )
+}
+
+export function formatSubagentToolcalls(count: number) {
+  return `${count} toolcall${count === 1 ? "" : "s"}`
+}
+
+export function formatCompletedSubagentDetail(toolcalls: number, duration: string) {
+  if (toolcalls === 0) return duration
+  return `${formatSubagentToolcalls(toolcalls)} · ${duration}`
 }
 
 function Edit(props: ToolProps<typeof EditTool>) {
