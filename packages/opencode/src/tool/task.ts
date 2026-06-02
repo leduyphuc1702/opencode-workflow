@@ -223,6 +223,8 @@ export const TaskTool = Tool.define(
             ? yield* ops.runtimeContextPrompt(next.name, params.prompt, model, settings)
             : params.prompt
         const parts = yield* ops.resolvePromptParts(prompt)
+        const parentVariant =
+          Option.isSome(lastUser) && lastUser.value.info.role === "user" ? lastUser.value.info.model.variant : undefined
         const result = yield* ops.prompt({
           messageID: MessageID.ascending(),
           sessionID: nextSession.id,
@@ -230,6 +232,7 @@ export const TaskTool = Tool.define(
             modelID: model.modelID,
             providerID: model.providerID,
           },
+          variant: parentVariant,
           agent: next.name,
           tools: {
             ...(next.permission.some((rule) => rule.permission === "todowrite") ? {} : { todowrite: false }),

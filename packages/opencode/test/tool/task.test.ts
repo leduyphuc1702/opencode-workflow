@@ -550,6 +550,61 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("execute propagates parent variant to subagent prompt", () =>
+    Effect.gen(function* () {
+      const session = yield* Session.Service
+      const chat = yield* session.create({ title: "VariantTest" })
+      const user = yield* session.updateMessage({
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID: chat.id,
+        agent: "build",
+        model: { ...ref, variant: "max" },
+        time: { created: Date.now() },
+      })
+      const assistant: MessageV2.Assistant = {
+        id: MessageID.ascending(),
+        role: "assistant",
+        parentID: user.id,
+        sessionID: chat.id,
+        mode: "build",
+        agent: "build",
+        cost: 0,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ref.modelID,
+        providerID: ref.providerID,
+        time: { created: Date.now() },
+      }
+      yield* session.updateMessage(assistant)
+
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let seen: SessionPrompt.PromptInput | undefined
+      const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+      yield* def.execute(
+        {
+          description: "variant check",
+          prompt: "verify effort propagation",
+          subagent_type: "general",
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(seen?.variant).toBe("max")
+    }),
+  )
+
   it.instance(
     "execute wraps frontend-agent prompts with runtime context only",
     () =>
