@@ -1,7 +1,15 @@
 import { Session } from "@/session/session"
 import { SessionID } from "@/session/schema"
+import { SecurityFinding } from "@/security/finding"
 import { WorkflowRuntime } from "@/workflow/runtime"
-import { WorkflowArtifactKind, WorkflowReviewStatus, WorkflowVariant } from "@/workflow/protocol"
+import {
+  WorkflowArtifactKind,
+  WorkflowReviewStatus,
+  WorkflowRiskLevel,
+  WorkflowSecurityFinding,
+  WorkflowVariant,
+  type WorkflowArtifact,
+} from "@/workflow/protocol"
 import { Question } from "@/question"
 import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
@@ -37,6 +45,10 @@ const RecordArtifactParameters = Schema.Struct({
     description: "Review result for plan_review, code_review, or skillopt_review artifacts.",
   }),
   variant: Schema.optional(WorkflowVariant).annotate({ description: "Optional explicit SOL workflow variant." }),
+  risk_label: Schema.optional(WorkflowRiskLevel).annotate({ description: "Optional security risk label." }),
+  security_finding: Schema.optional(WorkflowSecurityFinding).annotate({
+    description: "Optional structured security finding.",
+  }),
 })
 
 const ApprovalParameters = Schema.Struct({
@@ -109,6 +121,8 @@ export const WorkflowRecordArtifactTool = Tool.define<typeof RecordArtifactParam
             expectedChangedFiles: params.expectedChangedFiles ?? undefined,
             reviewStatus: params.reviewStatus,
             variant: params.variant,
+            risk_label: params.risk_label,
+            security_finding: params.security_finding,
           })
           return {
             title: `Artifact ${result.artifact.kind}`,
@@ -149,7 +163,7 @@ export const WorkflowApprovePlanTool = Tool.define<typeof ApprovePlanParameters,
             questions: [
               {
                 header: "FinalPlan",
-                question: "Approve this FinalPlan and allow implementation to start?",
+                question: approvalQuestion("Approve this FinalPlan and allow implementation to start?", finalPlan),
                 custom: true,
                 options: [
                   { label: "Approve", description: "Unlock implementation tools for this workflow session." },
@@ -204,13 +218,15 @@ export const WorkflowApproveDoneTool = Tool.define<typeof ApprovalParameters, Me
       execute: (params, ctx) =>
         Effect.gen(function* () {
           const sessionID = yield* workflowSessionID(sessions, ctx)
+          const record = yield* runtime.get(sessionID)
+          const review = latestArtifact(record, "code_review")
           const answers = yield* question.ask({
             sessionID,
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
             questions: [
               {
                 header: "Done",
-                question: "Approve this task as done?",
+                question: approvalQuestion("Approve this task as done?", review),
                 custom: true,
                 options: [
                   { label: "Approve", description: "Mark this SOL workflow done." },
@@ -256,13 +272,15 @@ export const WorkflowApproveCommitTool = Tool.define<typeof ApprovalParameters, 
       execute: (params, ctx) =>
         Effect.gen(function* () {
           const sessionID = yield* workflowSessionID(sessions, ctx)
+          const record = yield* runtime.get(sessionID)
+          const riskArtifact = latestArtifact(record, "done_approval") ?? latestArtifact(record, "code_review")
           const answers = yield* question.ask({
             sessionID,
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
             questions: [
               {
                 header: "Commit",
-                question: "Commit the approved changes?",
+                question: approvalQuestion("Commit the approved changes?", riskArtifact),
                 custom: true,
                 options: [
                   { label: "Commit", description: "Unlock git add and git commit commands for this workflow." },
@@ -402,6 +420,25 @@ function workflowSessionID(sessions: Session.Interface, ctx: Tool.Context) {
     const info = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
     return info.parentID ?? ctx.sessionID
   })
+}
+
+function approvalQuestion(question: string, artifact: WorkflowArtifact | undefined) {
+  const line = securityLine(artifact)
+  if (!line) return question
+  return `${question}\n\n${line}`
+}
+
+function securityLine(artifact: WorkflowArtifact | undefined) {
+  if (artifact?.security_finding && !SecurityFinding.isEmpty(artifact.security_finding)) {
+    return SecurityFinding.summarize(artifact.security_finding)
+  }
+  if (artifact?.risk_label) return `Security: ${artifact.risk_label}`
+}
+
+function latestArtifact(record: { artifacts?: readonly WorkflowArtifact[]; cycle?: number }, kind: WorkflowArtifact["kind"]) {
+  return (record.artifacts ?? [])
+    .filter((artifact) => artifact.kind === kind && artifact.cycle === (record.cycle ?? 0))
+    .toSorted((a, b) => b.timestamp.localeCompare(a.timestamp))[0]
 }
 
 function compactMessages(messages: Tool.Context["messages"]) {

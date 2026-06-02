@@ -1,9 +1,39 @@
-import { For, Show } from "solid-js"
+import { createMemo, For, Show } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { Button } from "@opencode-ai/ui/button"
 import { DockPrompt } from "@opencode-ai/ui/dock-prompt"
 import { Icon } from "@opencode-ai/ui/icon"
 import { useLanguage } from "@/context/language"
+
+type SecurityLevel = "low" | "medium" | "high" | "irreversible"
+type SecuritySecret = { type: string; line: string | number; redacted: string }
+type SecurityMetadata = { level: SecurityLevel; reasons: string[]; secrets: SecuritySecret[] }
+
+function securityMetadata(input: unknown): SecurityMetadata | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined
+
+  const record = input as Record<string, unknown>
+  if (!securityLevel(record.level)) return undefined
+
+  return {
+    level: record.level,
+    reasons: Array.isArray(record.reasons) ? record.reasons.filter((reason): reason is string => typeof reason === "string") : [],
+    secrets: Array.isArray(record.secrets)
+      ? record.secrets.flatMap((secret): SecuritySecret[] => {
+          if (!secret || typeof secret !== "object" || Array.isArray(secret)) return []
+          const item = secret as Record<string, unknown>
+          if (typeof item.type !== "string") return []
+          if (typeof item.redacted !== "string") return []
+          if (typeof item.line !== "string" && typeof item.line !== "number") return []
+          return [{ type: item.type, line: item.line, redacted: item.redacted }]
+        })
+      : [],
+  }
+}
+
+function securityLevel(input: unknown): input is SecurityLevel {
+  return input === "low" || input === "medium" || input === "high" || input === "irreversible"
+}
 
 export function SessionPermissionDock(props: {
   request: PermissionRequest
@@ -11,6 +41,7 @@ export function SessionPermissionDock(props: {
   onDecide: (response: "once" | "always" | "reject") => void
 }) {
   const language = useLanguage()
+  const security = createMemo(() => securityMetadata(props.request.metadata?.security))
 
   const toolDescription = () => {
     const key = `settings.permissions.tool.${props.request.permission}.description`
@@ -57,6 +88,39 @@ export function SessionPermissionDock(props: {
           <span data-slot="permission-spacer" aria-hidden="true" />
           <div data-slot="permission-hint">{toolDescription()}</div>
         </div>
+      </Show>
+
+      <Show when={security()}>
+        {(risk) => (
+          <>
+            <div data-slot="permission-row">
+              <span data-slot="permission-icon" aria-hidden="true">
+                <Icon name="warning" size="normal" />
+              </span>
+              <div data-slot="permission-hint">
+                <span
+                  class={
+                    "text-12-medium " +
+                    (risk().level === "high" || risk().level === "irreversible"
+                      ? "text-text-on-critical-base"
+                      : "text-icon-warning-active")
+                  }
+                >
+                  {"Security [" + risk().level + "]"}
+                </span>
+                <Show when={risk().reasons.length > 0}>{" " + risk().reasons.join("; ")}</Show>
+              </div>
+            </div>
+            <For each={risk().secrets}>
+              {(secret) => (
+                <div data-slot="permission-row">
+                  <span data-slot="permission-spacer" aria-hidden="true" />
+                  <div data-slot="permission-hint">{secret.type + " line " + secret.line + ": " + secret.redacted}</div>
+                </div>
+              )}
+            </For>
+          </>
+        )}
       </Show>
 
       <Show when={props.request.patterns.length > 0}>

@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect"
+import { Effect, Option, Stream } from "effect"
 import os from "os"
 import { createWriteStream } from "node:fs"
 import * as Tool from "./tool"
@@ -12,8 +12,16 @@ import { Language, type Node } from "web-tree-sitter"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { fileURLToPath } from "url"
 import { Config } from "@/config/config"
+import { ConfigSecurity } from "@/config/security"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { SecurityCommand } from "@/security/command"
+import { SecurityFinding } from "@/security/finding"
+import { SecurityReview } from "@/security/review"
+import { SecurityReviewer } from "@/security/reviewer"
+import { SecuritySandbox } from "@/security/sandbox"
+import { SecuritySecret } from "@/security/secret"
 import { Shell } from "@/shell/shell"
+import { Vcs } from "@/project/vcs"
 import { ShellID } from "./shell/id"
 
 import * as Truncate from "./truncate"
@@ -80,6 +88,13 @@ type Scan = {
 type Chunk = {
   text: string
   size: number
+}
+
+type SecurityPrompt = {
+  command: string
+  description?: string
+  warning?: string
+  finding?: SecurityFinding.Finding
 }
 
 export const log = Log.create({ service: "shell-tool" })
@@ -263,7 +278,7 @@ const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boole
   return tree
 })
 
-const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan) {
+const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, security?: SecurityPrompt) {
   if (scan.dirs.size > 0) {
     const globs = Array.from(scan.dirs).map((dir) => {
       if (process.platform === "win32") return AppFileSystem.normalizePathPattern(path.join(dir, "*"))
@@ -278,15 +293,106 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan)
   }
 
   if (scan.patterns.size === 0) return
+  const safeCommand =
+    security && security.finding && security.finding.secrets.length > 0
+      ? SecuritySecret.redactText(security.command)
+      : security?.command
   yield* ctx.ask({
     permission: ShellID.ToolID,
     patterns: Array.from(scan.patterns),
     always: Array.from(scan.always),
-    metadata: {},
+    metadata: security?.warning
+      ? {
+          input: {
+            command: `${safeCommand}\n${security.warning}`,
+            description: security.description,
+          },
+          security: security.finding,
+        }
+      : {},
   })
 })
 
-function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
+function securityPrompt(command: string, security: ConfigSecurity.Info | undefined) {
+  if (!ConfigSecurity.enabled(security)) return
+  const analysis = SecurityCommand.analyze(command)
+  const secrets = SecuritySecret.detect(command)
+  const finding = SecurityFinding.build(analysis, secrets)
+  const reviewed = isGitCommitOrPush(command)
+    ? {
+        ...finding,
+        reasons: [
+          ...finding.reasons,
+          "commit/push review: inspect staged and working-tree diff before shipping",
+          ...(ConfigSecurity.modelReview(security) ? [SecurityReviewer.gateHint()] : []),
+        ],
+      }
+    : finding
+
+  if (ConfigSecurity.mode(security) !== "strict") return reviewed
+  if (reviewed.decision === "deny") {
+    throw new Error(`Security guidance blocked shell command: ${reviewed.reasons.join("; ")}`)
+  }
+  if (reviewed.secrets.length > 0) {
+    throw new Error(
+      `Security guidance blocked shell command containing potential secret: ${reviewed.secrets
+        .map((secret) => `${secret.type} on line ${secret.line}: ${secret.redacted}`)
+        .join("; ")}`,
+    )
+  }
+  return reviewed
+}
+
+function securityWarning(finding: SecurityFinding.Finding) {
+  return [
+    `[Security: ${finding.level}/${finding.decision ?? "ask"}] ${finding.reasons.join("; ")}`,
+    ...finding.secrets.map((secret) => `[Security secret] ${secret.type} on line ${secret.line}: ${secret.redacted}`),
+  ].join("\n")
+}
+
+function isGitCommitOrPush(command: string) {
+  return SecurityCommand.splitCompound(command).some((part) => /^git\s+(?:commit|push)\b/.test(SecurityCommand.stripWrappers(part)))
+}
+
+// Real commit/push diff review: when enabled and the command ships code, read
+// the working-tree diff and run the deterministic reviewer over added lines.
+// Findings are redaction-safe (summarizeReview only emits redacted values).
+const commitPushReview = Effect.fn("ShellTool.commitPushReview")(function* (
+  command: string,
+  security: ConfigSecurity.Info | undefined,
+) {
+  if (!ConfigSecurity.enabled(security) || !isGitCommitOrPush(command)) return { warning: undefined, blocking: false }
+  const vcs = yield* Effect.serviceOption(Vcs.Service)
+  if (Option.isNone(vcs)) return { warning: undefined, blocking: false }
+  const diff = yield* vcs.value.diffRaw()
+  const findings = SecurityReview.reviewDiff(diff)
+  if (findings.length === 0) return { warning: undefined, blocking: false }
+  return {
+    warning: SecurityReview.summarizeReview(findings),
+    blocking: ConfigSecurity.mode(security) === "strict" && findings.some((item) => !item.advisory),
+  }
+})
+
+function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv, security: ConfigSecurity.Info | undefined) {
+  const sandbox = ConfigSecurity.enabled(security) ? ConfigSecurity.sandbox(security) : undefined
+  if (sandbox?.enabled) {
+    const wrapped = SecuritySandbox.wrap(command, {
+      ...sandbox,
+      cwd,
+      shell,
+      platform: process.platform,
+    })
+    if (wrapped.kind === "blocked") throw new Error(`Security sandbox blocked shell command: ${wrapped.reason}`)
+    if (wrapped.kind === "wrapped") {
+      return ChildProcess.make(wrapped.command, wrapped.args, {
+        cwd,
+        env,
+        stdin: "ignore",
+        detached: process.platform !== "win32",
+      })
+    }
+  }
+
   if (process.platform === "win32" && Shell.ps(shell)) {
     return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
       cwd,
@@ -429,6 +535,7 @@ export const ShellTool = Tool.define(
         env: NodeJS.ProcessEnv
         timeout: number
         description: string
+        security?: ConfigSecurity.Info
       },
       ctx: Tool.Context,
     ) {
@@ -479,7 +586,7 @@ export const ShellTool = Tool.define(
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Effect.addFinalizer(closeSink)
-          const handle = yield* spawner.spawn(cmd(input.shell, input.command, input.cwd, input.env))
+          const handle = yield* spawner.spawn(cmd(input.shell, input.command, input.cwd, input.env, input.security))
 
           yield* Effect.forkScoped(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
@@ -618,6 +725,15 @@ export const ShellTool = Tool.define(
               }
               const timeout = params.timeout ?? defaultTimeoutMs
               const ps = Shell.ps(shell)
+              const securityFinding = securityPrompt(params.command, cfg.security)
+              const review = yield* commitPushReview(params.command, cfg.security)
+              if (review.blocking) {
+                throw new Error(`Security guidance blocked commit/push (diff review): ${review.warning}`)
+              }
+              const warning = [securityFinding ? securityWarning(securityFinding) : undefined, review.warning]
+                .filter((item): item is string => Boolean(item))
+                .join("\n")
+                || undefined
               yield* Effect.scoped(
                 Effect.gen(function* () {
                   const tree = yield* Effect.acquireRelease(parse(params.command, ps), (tree) =>
@@ -625,7 +741,12 @@ export const ShellTool = Tool.define(
                   )
                   const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
-                  yield* ask(ctx, scan)
+                  yield* ask(ctx, scan, {
+                    command: params.command,
+                    description: params.description,
+                    warning,
+                    finding: securityFinding,
+                  })
                 }),
               )
 
@@ -637,6 +758,7 @@ export const ShellTool = Tool.define(
                   env: yield* shellEnv(ctx, cwd),
                   timeout,
                   description: params.description,
+                  security: cfg.security,
                 },
                 ctx,
               )

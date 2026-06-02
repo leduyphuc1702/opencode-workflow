@@ -3,6 +3,10 @@ import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { MCP } from "@/mcp"
 import { Permission } from "@/permission"
+import { Config } from "@/config/config"
+import { ConfigSecurity } from "@/config/security"
+import { SecurityMode } from "@/security/mode"
+import { SecurityScanner } from "@/security/scanner"
 import { Tool } from "@/tool/tool"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
@@ -39,10 +43,36 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const registry = yield* ToolRegistry.Service
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
+  const config = yield* Effect.serviceOption(Config.Service)
   const workflow = yield* Effect.serviceOption(WorkflowRuntime.Service)
 
   const beforeWorkflowTool = (input: WorkflowRuntime.BeforeToolInput): Effect.Effect<{ warning?: string }> =>
     Option.isSome(workflow) ? workflow.value.beforeTool(input).pipe(Effect.orDie) : Effect.succeed({ warning: undefined })
+
+  const beforeSecurityTool = (tool: string, args: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      if (Option.isNone(config)) return { warning: undefined, blocking: [] as SecurityScanner.Finding[] }
+      const security = (yield* config.value.get()).security
+      if (!ConfigSecurity.enabled(security)) return { warning: undefined, blocking: [] as SecurityScanner.Finding[] }
+      const target = securityScanTarget(tool, args)
+      if (!target) return { warning: undefined, blocking: [] as SecurityScanner.Finding[] }
+      const findings = SecurityScanner.scan(target)
+      const warning = securityWarning(findings)
+      const blocking = ConfigSecurity.mode(security) === "strict" ? findings.filter((item) => !item.advisory) : []
+      return { warning, blocking }
+    })
+
+  const securityPriorityRuleset = () =>
+    Effect.gen(function* () {
+      if (Option.isNone(config)) return [] as Permission.Ruleset
+      const security = (yield* config.value.get()).security
+      if (!ConfigSecurity.enabled(security)) return [] as Permission.Ruleset
+      return SecurityMode.deriveRules(ConfigSecurity.permissionMode(security), {
+        cwd: input.session.directory,
+        protectedPaths: ConfigSecurity.protectedPaths(security),
+        additionalDirectories: ConfigSecurity.additionalDirectories(security),
+      })
+    })
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -72,15 +102,37 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         }
       }),
     ask: (req) =>
-      permission
-        .ask({
+      Effect.gen(function* () {
+        const priority = yield* securityPriorityRuleset()
+        yield* permission.ask({
           ...req,
           sessionID: input.session.id,
           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
           ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
+          priority,
         })
-        .pipe(Effect.orDie),
+      }).pipe(Effect.orDie),
   })
+
+  const securityWarning = (findings: SecurityScanner.Finding[]) => {
+    if (findings.length === 0) return undefined
+    return findings.map((finding) => `${finding.level} ${finding.pattern} at line ${finding.line}`).join("\n")
+  }
+
+  const securityScanTarget = (tool: string, args: Record<string, unknown>) => {
+    if (tool === "write" && typeof args.filePath === "string" && typeof args.content === "string") {
+      return { path: args.filePath, content: args.content }
+    }
+    if (tool === "edit" && typeof args.filePath === "string" && typeof args.newString === "string") {
+      return { path: args.filePath, content: args.newString }
+    }
+    // apply_patch is a first-class mutating tool; scan its patch text so added
+    // content is checked like write/edit. Path attribution is coarse (the patch
+    // may touch several files) but secret/dangerous-pattern detection applies.
+    if (tool === "apply_patch" && typeof args.patchText === "string") {
+      return { path: "apply_patch", content: args.patchText }
+    }
+  }
 
   for (const item of yield* registry.tools({
     modelID: ModelID.make(input.model.api.id),
@@ -100,7 +152,11 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
               { args },
             )
-            const guard = yield* beforeWorkflowTool({
+            const securityGuard = yield* beforeSecurityTool(item.id, args)
+            if (securityGuard.warning) yield* ctx.metadata({ metadata: { security: securityGuard.warning } })
+            if (securityGuard.blocking.length > 0) return yield* new Permission.DeniedError({ ruleset: securityGuard.blocking })
+
+            const workflowGuard = yield* beforeWorkflowTool({
               workflowSessionID: input.session.parentID ?? input.session.id,
               currentSessionID: input.session.id,
               agent: input.agent.name,
@@ -108,9 +164,13 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               args,
             })
             const result = yield* item.execute(args, ctx)
+            const warnings = [
+              securityGuard.warning ? `[Security warning]\n${securityGuard.warning}` : undefined,
+              workflowGuard.warning ? `[Workflow warning] ${workflowGuard.warning}` : undefined,
+            ].filter((item): item is string => Boolean(item))
             const output = {
               ...result,
-              output: guard.warning ? `[Workflow warning] ${guard.warning}\n\n${result.output}` : result.output,
+              output: warnings.length > 0 ? `${warnings.join("\n\n")}\n\n${result.output}` : result.output,
               attachments: result.attachments?.map((attachment) => ({
                 ...attachment,
                 id: PartID.ascending(),

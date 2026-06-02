@@ -4,6 +4,10 @@ import { Parser } from "htmlparser2"
 import * as Tool from "./tool"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
+import { Config } from "@/config/config"
+import { ConfigSecurity } from "@/config/security"
+import { Permission } from "@/permission"
+import { SecurityNetwork } from "@/security/network"
 import { isImageAttachment } from "@/util/media"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
@@ -24,6 +28,7 @@ export const Parameters = Schema.Struct({
 export const WebFetchTool = Tool.define(
   "webfetch",
   Effect.gen(function* () {
+    const config = yield* Config.Service
     const http = yield* HttpClient.HttpClient
     const httpOk = HttpClient.filterStatusOk(http)
 
@@ -34,6 +39,14 @@ export const WebFetchTool = Tool.define(
         Effect.gen(function* () {
           if (!params.url.startsWith("http://") && !params.url.startsWith("https://")) {
             throw new Error("URL must start with http:// or https://")
+          }
+
+          const cfg = yield* config.get()
+          const network = ConfigSecurity.enabled(cfg.security) ? ConfigSecurity.network(cfg.security) : undefined
+          if (network?.allowedDomains && !SecurityNetwork.isAllowedDomain(params.url, network.allowedDomains, network.deniedDomains ?? [])) {
+            return yield* new Permission.DeniedError({
+              ruleset: [{ permission: "webfetch", pattern: params.url, action: "deny" }],
+            })
           }
 
           yield* ctx.ask({

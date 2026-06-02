@@ -1,0 +1,47 @@
+name: security-review
+
+# Optional recipe only. Keep or adapt this workflow after configuring
+# CLAUDE_API_KEY and reviewing GitHub Actions settings for external PRs.
+# It is advisory: it may comment on a PR, but it does not commit, push, or deploy.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  security-review:
+    name: optional Claude security review
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      - name: Check opt-in secret
+        id: opt-in
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          if [ -z "$CLAUDE_API_KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Security review skipped::Configure CLAUDE_API_KEY to enable this optional recipe."
+            exit 0
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pull request
+        if: ${{ steps.opt-in.outputs.enabled == 'true' }}
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - name: Run advisory security review
+        if: ${{ steps.opt-in.outputs.enabled == 'true' }}
+        uses: anthropics/claude-code-security-review@main
+        with:
+          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+          comment-pr: true
+          upload-results: true
+          claudecode-timeout: 20

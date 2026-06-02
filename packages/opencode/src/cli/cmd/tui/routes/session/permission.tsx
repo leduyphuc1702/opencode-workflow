@@ -19,6 +19,9 @@ import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut } from "../../keyma
 import { usePathFormatter } from "../../context/path-format"
 
 type PermissionStage = "permission" | "always" | "reject"
+type SecurityLevel = "low" | "medium" | "high" | "irreversible"
+type SecuritySecret = { type: string; line: string | number; redacted: string }
+type SecurityMetadata = { level: SecurityLevel; reasons: string[]; secrets: SecuritySecret[] }
 
 function filetype(input?: string) {
   if (!input) return "none"
@@ -26,6 +29,32 @@ function filetype(input?: string) {
   const language = LANGUAGE_EXTENSIONS[ext]
   if (["typescriptreact", "javascriptreact", "javascript"].includes(language)) return "typescript"
   return language
+}
+
+function securityMetadata(input: unknown): SecurityMetadata | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined
+
+  const record = input as Record<string, unknown>
+  if (!securityLevel(record.level)) return undefined
+
+  return {
+    level: record.level,
+    reasons: Array.isArray(record.reasons) ? record.reasons.filter((reason): reason is string => typeof reason === "string") : [],
+    secrets: Array.isArray(record.secrets)
+      ? record.secrets.flatMap((secret): SecuritySecret[] => {
+          if (!secret || typeof secret !== "object" || Array.isArray(secret)) return []
+          const item = secret as Record<string, unknown>
+          if (typeof item.type !== "string") return []
+          if (typeof item.redacted !== "string") return []
+          if (typeof item.line !== "string" && typeof item.line !== "number") return []
+          return [{ type: item.type, line: item.line, redacted: item.redacted }]
+        })
+      : [],
+  }
+}
+
+function securityLevel(input: unknown): input is SecurityLevel {
+  return input === "low" || input === "medium" || input === "high" || input === "irreversible"
 }
 
 function EditBody(props: { request: PermissionRequest }) {
@@ -135,6 +164,7 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
   })
 
   const { theme } = useTheme()
+  const security = createMemo(() => securityMetadata(props.request.metadata?.security))
 
   return (
     <Switch>
@@ -412,6 +442,28 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
                 </text>
                 <text fg={theme.text}>{current.title}</text>
               </box>
+              <Show when={security()}>
+                {(risk) => (
+                  <>
+                    <box flexDirection="row" gap={1} paddingLeft={2} flexShrink={0}>
+                      <text
+                        fg={risk().level === "high" || risk().level === "irreversible" ? theme.error : theme.warning}
+                        flexShrink={0}
+                      >
+                        {"[" + risk().level + "]"}
+                      </text>
+                      <text fg={theme.textMuted}>{risk().reasons.join("; ")}</text>
+                    </box>
+                    <For each={risk().secrets}>
+                      {(secret) => (
+                        <box paddingLeft={4} flexShrink={0}>
+                          <text fg={theme.textMuted}>{secret.type + " line " + secret.line + ": " + secret.redacted}</text>
+                        </box>
+                      )}
+                    </For>
+                  </>
+                )}
+              </Show>
             </box>
           )
 

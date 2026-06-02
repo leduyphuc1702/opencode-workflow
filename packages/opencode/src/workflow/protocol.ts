@@ -46,6 +46,23 @@ export type WorkflowVariant = Schema.Schema.Type<typeof WorkflowVariant>
 export const WorkflowReviewStatus = Schema.Literals(["approved", "no_findings", "needs_fix", "blocked"])
 export type WorkflowReviewStatus = Schema.Schema.Type<typeof WorkflowReviewStatus>
 
+export const WorkflowRiskLevel = Schema.Literals(["low", "medium", "high", "irreversible"])
+export type WorkflowRiskLevel = Schema.Schema.Type<typeof WorkflowRiskLevel>
+
+export const WorkflowSecurityFinding = Schema.Struct({
+  level: WorkflowRiskLevel,
+  decision: Schema.optional(Schema.Literals(["allow", "ask", "deny"])),
+  reasons: Schema.Array(Schema.String),
+  secrets: Schema.Array(
+    Schema.Struct({
+      type: Schema.String,
+      line: Schema.Int,
+      redacted: Schema.String,
+    }),
+  ),
+})
+export type WorkflowSecurityFinding = Schema.Schema.Type<typeof WorkflowSecurityFinding>
+
 export const WorkflowArtifact = Schema.Struct({
   id: Schema.String,
   kind: WorkflowArtifactKind,
@@ -58,6 +75,8 @@ export const WorkflowArtifact = Schema.Struct({
   expectedChangedFiles: Schema.optional(Schema.Array(Schema.String)),
   reviewStatus: Schema.optional(WorkflowReviewStatus),
   variant: Schema.optional(WorkflowVariant),
+  risk_label: Schema.optional(WorkflowRiskLevel),
+  security_finding: Schema.optional(WorkflowSecurityFinding),
 })
 export type WorkflowArtifact = Schema.Schema.Type<typeof WorkflowArtifact>
 

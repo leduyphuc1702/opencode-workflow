@@ -1,0 +1,175 @@
+---
+title: Security
+description: Understand the Security Guidance Layer and its permission safeguards.
+---
+
+The Security Guidance Layer adds deterministic checks around commands, edits, and permission prompts so OpenCode can warn about risky actions before they run.
+
+It is off by default. Existing behavior is unchanged unless you set `security.enabled`.
+
+---
+
+## Configuration
+
+Enable the layer in `opencode.json`:
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "security": {
+    "enabled": true,
+    "mode": "advisory",
+    "permissionMode": "default"
+  }
+}
+```
+
+`mode` controls how findings affect execution:
+
+- `"advisory"` — show findings in prompts and approvals, but keep normal permission flow.
+- `"strict"` — block explicit denies and high-confidence secrets, and require approval for risky actions.
+
+---
+
+## Permission Modes
+
+`security.permissionMode` adds security-aware defaults on top of normal [`permission`](/docs/permissions) rules:
+
+- `"default"` — use the existing permission rules without extra auto-allow behavior.
+- `"acceptEdits"` — allow edit/write actions inside the workspace and configured `additionalDirectories`.
+- `"plan"` — keep planning and read/search actions available, but prevent mutations.
+- `"bypassPermissions"` — allow most actions while still protecting configured circuit breakers.
+
+Use `protectedPaths` for paths that should stay guarded even when broad permissions are enabled:
+
+```json title="opencode.json"
+{
+  "security": {
+    "enabled": true,
+    "permissionMode": "acceptEdits",
+    "protectedPaths": ["~/.ssh/**", "*.env", ".git/config", "/etc/**"],
+    "additionalDirectories": ["~/projects/shared"]
+  }
+}
+```
+
+`additionalDirectories` extends the workspace boundary for file access. Keep the list focused on directories you trust.
+
+---
+
+## Checks
+
+Command checks classify shell requests before approval. They split compound commands, strip common wrappers, and flag patterns such as destructive deletes, force pushes, `curl | bash`, production deploys, migrations, and privileged cloud/IAM operations.
+
+Edit checks inspect new content for risky patterns such as dynamic evaluation, shell execution, unsafe deserialization, DOM injection, workflow changes, and credential-like values.
+
+Each finding has a level:
+
+- `low`
+- `medium`
+- `high`
+- `irreversible`
+
+Findings can be advisory, ask for approval, or deny the action depending on your configuration.
+
+---
+
+## Secret Redaction
+
+Secret detection reports the secret type, line, and a redacted sample only.
+
+Findings never expose raw secret values in prompts, artifacts, logs, or approval text.
+
+---
+
+## Diff Review & Commit/Push Gate
+
+When `security.enabled` is true, OpenCode reviews the current git diff before `git commit` and `git push` shell commands.
+
+The review scans added diff lines only. It is deterministic and pattern-based: it can catch known risky patterns and credential-like values, but it does not prove semantic vulnerabilities.
+
+In `"advisory"` mode, findings are added to the existing shell warning. In `"strict"` mode, live-looking secrets can block the commit or push gate.
+
+---
+
+## Model-Backed Review
+
+`security.modelReview` is opt-in and off by default.
+
+When enabled with `security.enabled`, the commit/push review can add an advisory model-backed review pass for semantic risk. The reviewer is loop-capped and does not block execution by itself.
+
+Use deterministic findings for known patterns and model-backed review for extra context. Without `security.modelReview`, the layer does not claim to find semantic vulnerabilities.
+
+```json title="opencode.json"
+{
+  "security": {
+    "enabled": true,
+    "modelReview": true
+  }
+}
+```
+
+---
+
+## Shell Sandbox
+
+`security.sandbox` is opt-in. When it is unset, shell commands are not wrapped.
+
+On macOS, OpenCode can build a `sandbox-exec` wrapper. On Linux, it can build a `bubblewrap` wrapper. The wrapper supports `"workspace-write"` and `"read-only"` modes and can deny common credential paths.
+
+Sandbox behavior depends on platform support and local sandbox tools. Keep it disabled unless you have validated the wrapper on your environment.
+
+```json title="opencode.json"
+{
+  "security": {
+    "enabled": true,
+    "sandbox": {
+      "enabled": true,
+      "mode": "workspace-write",
+      "allowNetwork": false
+    }
+  }
+}
+```
+
+---
+
+## Network Egress
+
+`security.network.allowedDomains` and `security.network.deniedDomains` are opt-in controls for `WebFetch`.
+
+Denied domains win over allowed domains. If `allowedDomains` is set, `WebFetch` only allows matching domains. If network policy is unset, `WebFetch` follows its normal permission flow.
+
+Shell command egress is not controlled by a standalone proxy. For shell commands, network limits rely on `security.sandbox` and the operating system sandbox support.
+
+```json title="opencode.json"
+{
+  "security": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": ["docs.example.com"],
+      "deniedDomains": ["metadata.google.internal"]
+    }
+  }
+}
+```
+
+---
+
+## CI Security Review
+
+The optional `.github/workflows/security-review.yml` recipe shows how to run a Claude Code style security review on pull requests.
+
+It is advisory and requires a configured API key secret before it does anything. It does not commit, push, deploy, or modify source files.
+
+For public repositories, review GitHub Actions settings before enabling it for external pull requests because model-backed review is not a prompt-injection boundary.
+
+---
+
+## Phases
+
+Phase 1 shipped the deterministic core: risk levels, command analysis, secret detection, edit scanning, and default-off configuration.
+
+Phase 2 shipped visibility and modes: structured security findings on permissions, risk badges in prompts, approval visibility, `permissionMode`, `protectedPaths`, and `additionalDirectories`.
+
+Phase 3 shipped default-off defense-in-depth: deterministic diff review at commit/push, opt-in model-backed review, opt-in shell sandbox wrapping, opt-in `WebFetch` network policy, and an optional CI security review recipe.

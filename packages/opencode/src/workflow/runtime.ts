@@ -61,6 +61,8 @@ export interface Interface {
     expectedChangedFiles?: readonly string[]
     reviewStatus?: WorkflowReviewStatus
     variant?: WorkflowVariant
+    risk_label?: WorkflowArtifact["risk_label"]
+    security_finding?: WorkflowArtifact["security_finding"]
   }) => Effect.Effect<{ record: Record; artifact: WorkflowArtifact; evidenceID: string }>
   readonly approveFinalPlan: (input: {
     sessionID: SessionID
@@ -157,6 +159,8 @@ export const layer = Layer.effect(
         expectedChangedFiles: input.expectedChangedFiles ? [...input.expectedChangedFiles] : undefined,
         reviewStatus: input.reviewStatus,
         variant: input.variant,
+        risk_label: input.risk_label,
+        security_finding: input.security_finding,
       }
       const event = yield* evidence.append({
         sessionID: input.sessionID,
