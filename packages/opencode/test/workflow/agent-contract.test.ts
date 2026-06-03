@@ -64,6 +64,23 @@ describe("workflow.agent-contract", () => {
     expect(prompt).toContain("Do not run")
   })
 
+  test("orchestrator prompt requires constructive clarification before plan-agent", async () => {
+    const prompt = await Bun.file(path.join(promptDir, "orchestrator-workflow.txt")).text()
+    const planAgent = prompt.indexOf("Run plan-agent")
+
+    expect(prompt).toContain("workflow_clarify_scope")
+    expect(prompt).toContain("clarification_checkpoint")
+    expect(prompt).toContain("constructive clarification")
+    expect(prompt).toContain("options/tradeoffs")
+    expect(prompt).toContain("user's choice")
+    expect(prompt).toContain("focused research")
+    expect(prompt).toContain("follow-up settings/constraints")
+    expect(prompt).toContain("readyToPlan true")
+    expect(prompt.indexOf("constructive clarification")).toBeLessThan(planAgent)
+    expect(prompt.indexOf("workflow_clarify_scope")).toBeLessThan(planAgent)
+    expect(prompt.indexOf("clarification_checkpoint")).toBeLessThan(planAgent)
+  })
+
   test("research agent prompt requires DuckDuckGo fallback for missing websearch", async () => {
     const prompt = await Bun.file(path.join(promptDir, "research-agent-workflow.txt")).text()
 

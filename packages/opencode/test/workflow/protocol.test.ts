@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { Result, Schema } from "effect"
-import { BreakRequest, ContextCheckpoint, EvidenceEvent, ResumePackage, WorkflowArtifact } from "@/workflow/protocol"
+import {
+  BreakRequest,
+  ClarificationCheckpointData,
+  ContextCheckpoint,
+  EvidenceEvent,
+  ResumePackage,
+  WorkflowArtifact,
+  WorkflowArtifactKind,
+} from "@/workflow/protocol"
 import { WorkflowRuntime } from "@/workflow/runtime"
 import { SessionID } from "@/session/schema"
 
@@ -8,6 +16,38 @@ const sessionID = Schema.decodeUnknownSync(SessionID)("ses_01J5Y5H0AH4Q4NXJ6P4C3
 const subagentSessionId = Schema.decodeUnknownSync(SessionID)("ses_01J5Y5H0AH4Q4NXJ6P4C3P5V2L")
 
 describe("workflow.protocol", () => {
+  test("workflow artifact kinds include clarification checkpoints", () => {
+    expect(Schema.decodeUnknownSync(WorkflowArtifactKind)("clarification_checkpoint")).toBe("clarification_checkpoint")
+  })
+
+  test("clarification checkpoint data decodes only complete answered checkpoints", () => {
+    const decode = Schema.decodeUnknownResult(ClarificationCheckpointData)
+
+    expect(
+      Result.isSuccess(
+        decode({
+          readyToPlan: true,
+          synthesis: "Scope clarified.",
+          options: [{ id: "minimal", label: "Minimal", tradeoffs: ["Smallest safe change"] }],
+          questions: [{ question: "Use minimal scope?", options: ["Yes", "No"], answer: "Yes" }],
+          selectedOption: "minimal",
+          unresolvedConstraints: [],
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      Result.isSuccess(
+        decode({
+          readyToPlan: true,
+          synthesis: "Missing question answer.",
+          options: [{ id: "minimal", label: "Minimal", tradeoffs: [] }],
+          questions: [{ question: "Use minimal scope?", options: ["Yes", "No"] }],
+          unresolvedConstraints: [],
+        }),
+      ),
+    ).toBe(false)
+  })
+
   test("requires break requests to carry resume context evidence", () => {
     const decode = Schema.decodeUnknownResult(BreakRequest)
 

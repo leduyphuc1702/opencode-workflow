@@ -27,6 +27,7 @@ export const WorkflowArtifactKind = Schema.Literals([
   "frontend_explore",
   "research_explore",
   "scope_decision",
+  "clarification_checkpoint",
   "plan_draft",
   "plan_review",
   "final_plan",
@@ -62,6 +63,28 @@ export const WorkflowSecurityFinding = Schema.Struct({
   ),
 })
 export type WorkflowSecurityFinding = Schema.Schema.Type<typeof WorkflowSecurityFinding>
+
+export const ClarificationCheckpointData = Schema.Struct({
+  readyToPlan: Schema.Boolean,
+  synthesis: Schema.String,
+  options: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      label: Schema.String,
+      tradeoffs: Schema.Array(Schema.String),
+    }),
+  ),
+  questions: Schema.Array(
+    Schema.Struct({
+      question: Schema.String,
+      options: Schema.Array(Schema.String),
+      answer: Schema.String,
+    }),
+  ),
+  selectedOption: Schema.optional(Schema.String),
+  unresolvedConstraints: Schema.Array(Schema.String),
+})
+export type ClarificationCheckpointData = Schema.Schema.Type<typeof ClarificationCheckpointData>
 
 export const WorkflowArtifact = Schema.Struct({
   id: Schema.String,

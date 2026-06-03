@@ -78,6 +78,7 @@ import {
   WorkflowApproveDoneTool,
   WorkflowApprovePlanTool,
   WorkflowBreakTool,
+  WorkflowClarifyScopeTool,
   WorkflowRecordArtifactTool,
   WorkflowResumeBreakTool,
   WorkflowStateTool,
@@ -180,6 +181,7 @@ const baseLayer: Layer.Layer<
     const codebaseExplore = yield* CodebaseExploreTool
     const workflowState = yield* WorkflowStateTool
     const workflowRecordArtifact = yield* WorkflowRecordArtifactTool
+    const workflowClarifyScope = yield* WorkflowClarifyScopeTool
     const workflowApprovePlan = yield* WorkflowApprovePlanTool
     const workflowApproveDone = yield* WorkflowApproveDoneTool
     const workflowApproveCommit = yield* WorkflowApproveCommitTool
@@ -309,6 +311,7 @@ const baseLayer: Layer.Layer<
           codebase_explore: Tool.init(codebaseExplore),
           workflow_state: Tool.init(workflowState),
           workflow_record_artifact: Tool.init(workflowRecordArtifact),
+          workflow_clarify_scope: Tool.init(workflowClarifyScope),
           workflow_approve_plan: Tool.init(workflowApprovePlan),
           workflow_approve_done: Tool.init(workflowApproveDone),
           workflow_approve_commit: Tool.init(workflowApproveCommit),
@@ -349,6 +352,7 @@ const baseLayer: Layer.Layer<
             tool.codebase_explore,
             tool.workflow_state,
             tool.workflow_record_artifact,
+            tool.workflow_clarify_scope,
             tool.workflow_approve_plan,
             tool.workflow_approve_done,
             tool.workflow_approve_commit,

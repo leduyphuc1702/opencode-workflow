@@ -131,6 +131,7 @@ describe("tool.registry", () => {
       expect(ids).toContain("codebase_explore")
       expect(ids).toContain("workflow_state")
       expect(ids).toContain("workflow_record_artifact")
+      expect(ids).toContain("workflow_clarify_scope")
       expect(ids).toContain("workflow_approve_plan")
       expect(ids).toContain("workflow_approve_done")
       expect(ids).toContain("workflow_approve_commit")
@@ -151,6 +152,7 @@ describe("tool.registry", () => {
       const workflowTools = [
         "workflow_state",
         "workflow_record_artifact",
+        "workflow_clarify_scope",
         "workflow_approve_plan",
         "workflow_approve_done",
         "workflow_approve_commit",
@@ -166,6 +168,7 @@ describe("tool.registry", () => {
       }
 
       const workflowBreak = tools.find((item) => item.id === "workflow_break")
+      const workflowClarifyScope = tools.find((item) => item.id === "workflow_clarify_scope")
       const workflowRecordArtifact = tools.find((item) => item.id === "workflow_record_artifact")
       const workflowApprovePlan = tools.find((item) => item.id === "workflow_approve_plan")
       const workflowApproveDone = tools.find((item) => item.id === "workflow_approve_done")
@@ -173,6 +176,7 @@ describe("tool.registry", () => {
       const workflowResumeBreak = tools.find((item) => item.id === "workflow_resume_break")
       if (
         !workflowBreak ||
+        !workflowClarifyScope ||
         !workflowRecordArtifact ||
         !workflowApprovePlan ||
         !workflowApproveDone ||
@@ -193,6 +197,14 @@ describe("tool.registry", () => {
       expect(ToolJsonSchema.fromTool(workflowApprovePlan)).toMatchObject({
         required: ["plan"],
         properties: { plan: { type: "string" } },
+      })
+      expect(ToolJsonSchema.fromTool(workflowClarifyScope)).toMatchObject({
+        required: ["readyToPlan", "synthesis", "options", "questions", "unresolvedConstraints"],
+        properties: {
+          readyToPlan: { type: "boolean" },
+          synthesis: { type: "string" },
+          unresolvedConstraints: { type: "array" },
+        },
       })
       expect(ToolJsonSchema.fromTool(workflowRecordArtifact)).toMatchObject({
         required: ["kind", "summary"],

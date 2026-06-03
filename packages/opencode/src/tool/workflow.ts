@@ -3,6 +3,7 @@ import { SessionID } from "@/session/schema"
 import { SecurityFinding } from "@/security/finding"
 import { WorkflowRuntime } from "@/workflow/runtime"
 import {
+  ClarificationCheckpointData,
   WorkflowArtifactKind,
   WorkflowReviewStatus,
   WorkflowRiskLevel,
@@ -49,6 +50,29 @@ const RecordArtifactParameters = Schema.Struct({
   security_finding: Schema.optional(WorkflowSecurityFinding).annotate({
     description: "Optional structured security finding.",
   }),
+})
+
+const ClarifyScopeParameters = Schema.Struct({
+  readyToPlan: Schema.Boolean.annotate({ description: "Whether clarification is complete enough to start planning." }),
+  synthesis: Schema.String.annotate({ description: "Concise synthesis of the clarified scope and decision." }),
+  options: Schema.Array(
+    Schema.Struct({
+      id: Schema.String.annotate({ description: "Stable option id." }),
+      label: Schema.String.annotate({ description: "Short option label." }),
+      tradeoffs: Schema.Array(Schema.String).annotate({ description: "Known tradeoffs for this option." }),
+    }),
+  ).annotate({ description: "Scope options considered before asking the user." }),
+  questions: Schema.Array(
+    Schema.Struct({
+      question: Schema.String.annotate({ description: "Question to ask the user." }),
+      options: Schema.Array(Schema.String).annotate({ description: "Answer choices to show the user." }),
+    }),
+  ).annotate({ description: "Clarifying questions to ask before recording the checkpoint." }),
+  selectedOption: Schema.optional(Schema.String).annotate({ description: "Selected option id, if one was chosen." }),
+  unresolvedConstraints: Schema.Array(Schema.String).annotate({
+    description: "Constraints still unresolved after clarification. Must be empty before plan-agent can run.",
+  }),
+  evidenceIds: EvidenceIds,
 })
 
 const ApprovalParameters = Schema.Struct({
@@ -110,6 +134,11 @@ export const WorkflowRecordArtifactTool = Tool.define<typeof RecordArtifactParam
       parameters: RecordArtifactParameters,
       execute: (params, ctx) =>
         Effect.gen(function* () {
+          if (params.kind === "clarification_checkpoint") {
+            return yield* Effect.fail(
+              new Error("use workflow_clarify_scope to record clarification_checkpoint artifacts."),
+            )
+          }
           const sessionID = yield* workflowSessionID(sessions, ctx)
           const result = yield* runtime.recordArtifact({
             sessionID,
@@ -126,6 +155,88 @@ export const WorkflowRecordArtifactTool = Tool.define<typeof RecordArtifactParam
           })
           return {
             title: `Artifact ${result.artifact.kind}`,
+            metadata: { state: result.record.state, evidenceID: result.evidenceID },
+            output: JSON.stringify(
+              { artifact: result.artifact, state: result.record.state, evidenceID: result.evidenceID },
+              null,
+              2,
+            ),
+          }
+        }).pipe(Effect.orDie),
+    }
+  }),
+)
+
+export const WorkflowClarifyScopeTool = Tool.define<typeof ClarifyScopeParameters, Metadata, Services>(
+  "workflow_clarify_scope",
+  Effect.gen(function* () {
+    const runtime = yield* WorkflowRuntime.Service
+    const question = yield* Question.Service
+    const sessions = yield* Session.Service
+
+    return {
+      description: "Ask the user to resolve SOL scope questions and record a clarification_checkpoint artifact.",
+      parameters: ClarifyScopeParameters,
+      execute: (params, ctx) =>
+        Effect.gen(function* () {
+          if (params.options.length === 0) {
+            return yield* Effect.fail(new Error("workflow_clarify_scope requires at least one scope option."))
+          }
+          if (params.questions.length === 0) {
+            return yield* Effect.fail(new Error("workflow_clarify_scope requires at least one question."))
+          }
+          if (params.questions.some((item) => item.options.length === 0)) {
+            return yield* Effect.fail(new Error("workflow_clarify_scope questions require at least one answer option."))
+          }
+          const sessionID = yield* workflowSessionID(sessions, ctx)
+          const scopeSummary = [
+            `Synthesis: ${params.synthesis}`,
+            "Options:",
+            ...params.options.map(
+              (option) =>
+                `- ${option.label} (${option.id}): ${option.tradeoffs.length ? option.tradeoffs.join("; ") : "No tradeoffs listed."}`,
+            ),
+          ].join("\n")
+          const answers = yield* question.ask({
+            sessionID,
+            tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+            questions: params.questions.map((item, index) => ({
+              header: `Scope ${index + 1}`,
+              question: `${scopeSummary}\n\nQuestion: ${item.question}`,
+              custom: true,
+              options: item.options.map((option) => ({
+                label: option,
+                description:
+                  params.options.find((root) => root.id === option || root.label === option)?.tradeoffs.join("; ") || option,
+              })),
+            })),
+          })
+          const answerTexts = params.questions.map((_, index) => answers[index]?.join("\n").trim() ?? "")
+          if (answerTexts.some((answer) => answer.length === 0)) {
+            return yield* Effect.fail(new Error("workflow_clarify_scope requires a non-empty answer for every question."))
+          }
+          const data: ClarificationCheckpointData = {
+            readyToPlan: params.readyToPlan,
+            synthesis: params.synthesis,
+            options: params.options.map((option) => ({ ...option, tradeoffs: [...option.tradeoffs] })),
+            questions: params.questions.map((item, index) => ({
+              question: item.question,
+              options: [...item.options],
+              answer: answerTexts[index] ?? "",
+            })),
+            selectedOption: params.selectedOption,
+            unresolvedConstraints: [...params.unresolvedConstraints],
+          }
+          const result = yield* runtime.recordArtifact({
+            sessionID,
+            agent: ctx.agent,
+            kind: "clarification_checkpoint",
+            summary: params.synthesis,
+            data,
+            evidenceIds: params.evidenceIds ?? [],
+          })
+          return {
+            title: "Clarification checkpoint",
             metadata: { state: result.record.state, evidenceID: result.evidenceID },
             output: JSON.stringify(
               { artifact: result.artifact, state: result.record.state, evidenceID: result.evidenceID },

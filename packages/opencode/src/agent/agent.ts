@@ -128,6 +128,7 @@ export const layer = Layer.effect(
           github_skill_search: "deny",
           repo_clone: "deny",
           repo_overview: "deny",
+          workflow_clarify_scope: "deny",
           // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
           read: {
             "*": "allow",
@@ -166,6 +167,7 @@ export const layer = Layer.effect(
                 codebase_explore: "allow",
                 workflow_state: "allow",
                 workflow_record_artifact: "allow",
+                workflow_clarify_scope: "allow",
                 workflow_approve_plan: "allow",
                 workflow_approve_done: "allow",
                 workflow_approve_commit: "allow",

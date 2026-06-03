@@ -5,6 +5,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import {
   BreakRequest,
+  ClarificationCheckpointData,
   ContextCheckpoint,
   EvidenceEvent,
   ResumePackage,
@@ -110,6 +111,7 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/WorkflowRuntime") {}
 
 const decodeRecord = Schema.decodeUnknownOption(Record)
+const decodeClarificationCheckpoint = Schema.decodeUnknownOption(ClarificationCheckpointData)
 
 export const layer = Layer.effect(
   Service,
@@ -170,9 +172,10 @@ export const layer = Layer.effect(
       })
       const nextArtifacts = [...(record.artifacts ?? []), { ...artifact, evidenceIds: unique([...artifact.evidenceIds, event.id]) }]
       const restartsPlanning = input.kind === "code_review" && input.reviewStatus === "blocked"
+      const nextRecord = { ...record, artifacts: nextArtifacts }
       const saved = yield* save({
         ...record,
-        state: restartsPlanning ? "planning" : stateAfterArtifact(input.kind, input.reviewStatus),
+        state: restartsPlanning ? "planning" : stateAfterArtifact(nextRecord, input.kind, input.reviewStatus),
         cycle: restartsPlanning ? cycle + 1 : cycle,
         variant: restartsPlanning ? undefined : input.variant ?? record.variant,
         approvedPlan: restartsPlanning ? undefined : record.approvedPlan,
@@ -491,9 +494,14 @@ function currentCommitApproved(record: Record) {
   return !!record.commitApprovedAt && hasCurrentArtifact(record, "commit_approval")
 }
 
-function stateAfterArtifact(kind: WorkflowArtifactKind, reviewStatus?: WorkflowReviewStatus): WorkflowState {
+function stateAfterArtifact(record: Record, kind: WorkflowArtifactKind, reviewStatus?: WorkflowReviewStatus): WorkflowState {
   if (kind === "intake_spec") return "exploring"
-  if (kind === "scope_decision") return "planning"
+  if (kind === "scope_decision") return "brainstorming"
+  if (kind === "clarification_checkpoint") {
+    if (currentClarificationReady(record)) return "planning"
+    if (record.state === "planning") return "brainstorming"
+    return record.state
+  }
   if (kind === "plan_draft") return "plan_review"
   if (kind === "plan_review") return "plan_finalizing"
   if (kind === "final_plan") return "awaiting_plan_approval"
@@ -518,6 +526,9 @@ function taskBlocker(record: Record, agent: string | undefined) {
   if (!agent) return
   if (agent === "plan-agent" && !hasCurrentArtifacts(record, exploreAndScopeArtifacts)) {
     return "SOL gate blocked plan-agent. Record backend_explore, frontend_explore, research_explore, and scope_decision first."
+  }
+  if (agent === "plan-agent" && !currentClarificationReady(record)) {
+    return "SOL gate blocked plan-agent. Use workflow_clarify_scope to record a ready clarification_checkpoint with no unresolved constraints."
   }
   if (agent === "plan-reviewer" && !hasCurrentArtifact(record, "plan_draft")) {
     return "SOL gate blocked plan-reviewer. Record a plan_draft artifact first."
@@ -555,6 +566,48 @@ function implementationReady(record: Record) {
     return hasCurrentArtifact(record, "backend_implementation") && hasCurrentArtifact(record, "frontend_implementation")
   }
   return hasCurrentArtifact(record, "implementation") || hasCurrentArtifact(record, "backend_implementation")
+}
+
+function currentClarificationReady(record: Record) {
+  const index = latestCurrentArtifactIndex(record, "clarification_checkpoint")
+  if (index === -1) return false
+  if (!exploreAndScopeArtifacts.every((kind) => {
+    const required = latestCurrentArtifactIndex(record, kind)
+    return required !== -1 && required < index
+  })) {
+    return false
+  }
+  const artifact = (record.artifacts ?? [])[index]
+  if (!artifact) return false
+  const decoded = decodeClarificationCheckpoint(artifact.data, { onExcessProperty: "preserve" })
+  if (Option.isNone(decoded)) return false
+  return clarificationReady(decoded.value)
+}
+
+function latestCurrentArtifact(record: Record, kind: WorkflowArtifactKind) {
+  const index = latestCurrentArtifactIndex(record, kind)
+  return index === -1 ? undefined : (record.artifacts ?? [])[index]
+}
+
+function latestCurrentArtifactIndex(record: Record, kind: WorkflowArtifactKind) {
+  return (record.artifacts ?? []).findLastIndex((artifact) => artifact.kind === kind && artifact.cycle === (record.cycle ?? 0))
+}
+
+function clarificationReady(data: ClarificationCheckpointData) {
+  return (
+    data.readyToPlan &&
+    data.options.length > 0 &&
+    data.options.every((option) => option.id.trim().length > 0 && option.label.trim().length > 0) &&
+    data.questions.length > 0 &&
+    data.questions.every(
+      (item) =>
+        item.question.trim().length > 0 &&
+        item.options.length > 0 &&
+        item.options.every((option) => option.trim().length > 0) &&
+        item.answer.trim().length > 0,
+    ) &&
+    data.unresolvedConstraints.length === 0
+  )
 }
 
 function taskAgent(args: unknown) {

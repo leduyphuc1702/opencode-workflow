@@ -2,6 +2,7 @@ import { describe, expect } from "bun:test"
 import { Cause, Effect, Exit, Layer } from "effect"
 import { SessionID } from "@/session/schema"
 import { WorkflowEvidence } from "@/workflow/evidence"
+import type { ClarificationCheckpointData } from "@/workflow/protocol"
 import { WorkflowRuntime } from "@/workflow/runtime"
 import { testEffect } from "../lib/effect"
 
@@ -29,7 +30,77 @@ describe("workflow.runtime", () => {
       yield* runtime.recordArtifact({ sessionID, agent: "backend-explorer", kind: "backend_explore", summary: "backend" })
       yield* runtime.recordArtifact({ sessionID, agent: "frontend-explorer", kind: "frontend_explore", summary: "frontend" })
       yield* runtime.recordArtifact({ sessionID, agent: "research-agent", kind: "research_explore", summary: "research" })
-      yield* runtime.recordArtifact({ sessionID, agent: "orchestrator-agent", kind: "scope_decision", summary: "scope" })
+      const scoped = yield* runtime.recordArtifact({ sessionID, agent: "orchestrator-agent", kind: "scope_decision", summary: "scope" })
+      expect(scoped.record.state).toBe("brainstorming")
+
+      const blockedClarification = yield* runtime
+        .beforeTool({
+          workflowSessionID: sessionID,
+          currentSessionID: sessionID,
+          agent: "orchestrator-agent",
+          tool: "task",
+          args: { subagent_type: "plan-agent" },
+        })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(blockedClarification)).toBe(true)
+      if (!Exit.isFailure(blockedClarification)) throw new Error("expected clarification gate")
+      expect(Cause.pretty(blockedClarification.cause)).toContain("clarification_checkpoint")
+
+      const malformed = yield* runtime.recordArtifact({
+        sessionID,
+        agent: "orchestrator-agent",
+        kind: "clarification_checkpoint",
+        summary: "malformed",
+        data: { readyToPlan: true },
+      })
+      expect(malformed.record.state).toBe("brainstorming")
+      const blockedMalformed = yield* runtime
+        .beforeTool({
+          workflowSessionID: sessionID,
+          currentSessionID: sessionID,
+          agent: "orchestrator-agent",
+          tool: "task",
+          args: { subagent_type: "plan-agent" },
+        })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(blockedMalformed)).toBe(true)
+
+      const notReady = yield* runtime.recordArtifact({
+        sessionID,
+        agent: "orchestrator-agent",
+        kind: "clarification_checkpoint",
+        summary: "not ready",
+        data: clarification({ readyToPlan: false, unresolvedConstraints: ["Need owner"] }),
+      })
+      expect(notReady.record.state).toBe("brainstorming")
+      const blockedNotReady = yield* runtime
+        .beforeTool({
+          workflowSessionID: sessionID,
+          currentSessionID: sessionID,
+          agent: "orchestrator-agent",
+          tool: "task",
+          args: { subagent_type: "plan-agent" },
+        })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(blockedNotReady)).toBe(true)
+
+      const emptyAnswer = yield* runtime.recordArtifact({
+        sessionID,
+        agent: "orchestrator-agent",
+        kind: "clarification_checkpoint",
+        summary: "empty answer",
+        data: clarification({ questions: [{ question: "Proceed?", options: ["Yes"], answer: " " }] }),
+      })
+      expect(emptyAnswer.record.state).toBe("brainstorming")
+
+      const ready = yield* runtime.recordArtifact({
+        sessionID,
+        agent: "orchestrator-agent",
+        kind: "clarification_checkpoint",
+        summary: "ready",
+        data: clarification(),
+      })
+      expect(ready.record.state).toBe("planning")
 
       yield* runtime.beforeTool({
         workflowSessionID: sessionID,
@@ -83,6 +154,141 @@ describe("workflow.runtime", () => {
         agent: "orchestrator-agent",
         tool: "task",
         args: { subagent_type: "plan-finalizer" },
+      })
+    }),
+  )
+
+  it.effect("requires clarification checkpoints from the current planning cycle", () =>
+    Effect.gen(function* () {
+      const runtime = yield* WorkflowRuntime.Service
+      const sessionID = id("clarification-cycle")
+
+      yield* runtime.recordArtifact({ sessionID, agent: "backend-explorer", kind: "backend_explore", summary: "backend" })
+      yield* runtime.recordArtifact({ sessionID, agent: "frontend-explorer", kind: "frontend_explore", summary: "frontend" })
+      yield* runtime.recordArtifact({ sessionID, agent: "research-agent", kind: "research_explore", summary: "research" })
+      yield* runtime.recordArtifact({ sessionID, agent: "orchestrator-agent", kind: "scope_decision", summary: "scope" })
+      yield* runtime.recordArtifact({
+        sessionID,
+        agent: "orchestrator-agent",
+        kind: "clarification_checkpoint",
+        summary: "ready",
+        data: clarification(),
+      })
+      yield* runtime.restartPlanning({ sessionID, agent: "orchestrator-agent", reason: "new cycle" })
+      yield* runtime.recordArtifact({ sessionID, agent: "backend-explorer", kind: "backend_explore", summary: "backend" })
+      yield* runtime.recordArtifact({ sessionID, agent: "frontend-explorer", kind: "frontend_explore", summary: "frontend" })
+      yield* runtime.recordArtifact({ sessionID, agent: "research-agent", kind: "research_explore", summary: "research" })
+      yield* runtime.recordArtifact({ sessionID, agent: "orchestrator-agent", kind: "scope_decision", summary: "scope" })
+
+      const blocked = yield* runtime
+        .beforeTool({
+          workflowSessionID: sessionID,
+          currentSessionID: sessionID,
+          agent: "orchestrator-agent",
+          tool: "task",
+          args: { subagent_type: "plan-agent" },
+        })
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(blocked)).toBe(true)
+      if (!Exit.isFailure(blocked)) throw new Error("expected current-cycle clarification gate")
+      expect(Cause.pretty(blocked.cause)).toContain("clarification_checkpoint")
+    }),
+  )
+
+  it.effect("downgrades planning when latest clarification checkpoint is not ready", () =>
+    Effect.gen(function* () {
+      const runtime = yield* WorkflowRuntime.Service
+      const sessionID = id("clarification-downgrade")
+
+      yield* runtime.recordArtifact({ sessionID, agent: "backend-explorer", kind: "backend_explore", summary: "backend" })
+      yield* runtime.recordArtifact({ sessionID, agent: "frontend-explorer", kind: "frontend_explore", summary: "frontend" })
+      yield* runtime.recordArtifact({ sessionID, agent: "research-agent", kind: "research_explore", summary: "research" })
+      yield* runtime.recordArtifact({ sessionID, agent: "orchestrator-agent", kind: "scope_decision", summary: "scope" })
+
+      const ready = yield* runtime.recordArtifact({
+        sessionID,
+        agent: "orchestrator-agent",
+        kind: "clarification_checkpoint",
+        summary: "ready",
+        data: clarification(),
+      })
+      expect(ready.record.state).toBe("planning")
+
+      const notReady = yield* runtime.recordArtifact({
+        sessionID,
+        agent: "orchestrator-agent",
+        kind: "clarification_checkpoint",
+        summary: "not ready",
+        data: clarification({ readyToPlan: false, unresolvedConstraints: ["Need owner"] }),
+      })
+      expect(notReady.record.state).toBe("brainstorming")
+
+      const blocked = yield* runtime
+        .beforeTool({
+          workflowSessionID: sessionID,
+          currentSessionID: sessionID,
+          agent: "orchestrator-agent",
+          tool: "task",
+          args: { subagent_type: "plan-agent" },
+        })
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(blocked)).toBe(true)
+      if (!Exit.isFailure(blocked)) throw new Error("expected clarification gate")
+      expect(Cause.pretty(blocked.cause)).toContain("clarification_checkpoint")
+    }),
+  )
+
+  it.effect("requires clarification checkpoints after current-cycle explore and scope artifacts", () =>
+    Effect.gen(function* () {
+      const runtime = yield* WorkflowRuntime.Service
+      const sessionID = id("clarification-order")
+
+      const early = yield* runtime.recordArtifact({
+        sessionID,
+        agent: "orchestrator-agent",
+        kind: "clarification_checkpoint",
+        summary: "early ready",
+        data: clarification(),
+      })
+      expect(early.record.state).toBe("intake")
+
+      yield* runtime.recordArtifact({ sessionID, agent: "backend-explorer", kind: "backend_explore", summary: "backend" })
+      yield* runtime.recordArtifact({ sessionID, agent: "frontend-explorer", kind: "frontend_explore", summary: "frontend" })
+      yield* runtime.recordArtifact({ sessionID, agent: "research-agent", kind: "research_explore", summary: "research" })
+      const scoped = yield* runtime.recordArtifact({ sessionID, agent: "orchestrator-agent", kind: "scope_decision", summary: "scope" })
+      expect(scoped.record.state).toBe("brainstorming")
+
+      const blocked = yield* runtime
+        .beforeTool({
+          workflowSessionID: sessionID,
+          currentSessionID: sessionID,
+          agent: "orchestrator-agent",
+          tool: "task",
+          args: { subagent_type: "plan-agent" },
+        })
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(blocked)).toBe(true)
+      if (!Exit.isFailure(blocked)) throw new Error("expected ordered clarification gate")
+      expect(Cause.pretty(blocked.cause)).toContain("clarification_checkpoint")
+
+      const ready = yield* runtime.recordArtifact({
+        sessionID,
+        agent: "orchestrator-agent",
+        kind: "clarification_checkpoint",
+        summary: "ready",
+        data: clarification(),
+      })
+      expect(ready.record.state).toBe("planning")
+
+      yield* runtime.beforeTool({
+        workflowSessionID: sessionID,
+        currentSessionID: sessionID,
+        agent: "orchestrator-agent",
+        tool: "task",
+        args: { subagent_type: "plan-agent" },
       })
     }),
   )
@@ -484,4 +690,15 @@ describe("workflow.runtime", () => {
 
 function id(name: string) {
   return SessionID.make(`ses_workflow_runtime_${name}_${Date.now()}_${Math.random().toString(16).slice(2)}`)
+}
+
+function clarification(input: Partial<ClarificationCheckpointData> = {}): ClarificationCheckpointData {
+  return {
+    readyToPlan: true,
+    synthesis: "Scope is clear enough to plan.",
+    options: [{ id: "minimal", label: "Minimal", tradeoffs: ["Fastest"] }],
+    questions: [{ question: "Proceed with minimal scope?", options: ["Yes", "No"], answer: "Yes" }],
+    unresolvedConstraints: [],
+    ...input,
+  }
 }

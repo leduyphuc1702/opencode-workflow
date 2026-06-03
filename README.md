@@ -57,11 +57,11 @@ Agent coding thông thường dễ rơi vào vòng lặp:
 | Năng lực | OpenCode gốc | opencode-workflow |
 | --- | --- | --- |
 | Codebase understanding | Agent có thể đọc/search file | CodeGraph-first cho symbol, callers/callees, trace, impact, affected tests |
-| Planning | Có plan mode | SOL bắt buộc intake → explore → scope → plan → review → final plan |
+| Planning | Có plan mode | SOL bắt buộc intake → explore → scope → clarification checkpoint → plan → review → final plan |
 | Approval | Permission/tool approval | Approval gate cho plan, done, commit |
 | Orchestration | Agent/subagent | Orchestrator + backend/frontend/research/plan/review/finalizer/code-reviewer agents |
 | Skills | Load skill theo mô tả | Task-scoped skill loading, remote skill lease, SkillOpt-style review |
-| User clarification | Agent có thể hỏi trực tiếp | Smart break: sub-agent emit `BreakRequest`, orchestrator hỏi user rồi resume đúng session |
+| User clarification | Agent có thể hỏi trực tiếp | Mandatory post-Explore `workflow_clarify_scope`; sub-agent vẫn dùng `BreakRequest` khi bị block |
 | Evidence | Conversation history | Typed artifacts + evidence IDs cho từng bước quan trọng |
 | Model routing | Provider/model support | Thêm 9router local OpenAI-compatible provider |
 
@@ -91,17 +91,17 @@ SOL trong fork này nghĩa là:
 
 - **Spec**: chuẩn hóa yêu cầu, gọi rõ intent/scope/acceptance criteria.
 - **Observe/Explore**: backend, frontend, research cùng explore trước khi plan.
-- **Lead/Plan**: plan-agent tạo plan, plan-reviewer phản biện, plan-finalizer tạo FinalPlan.
+- **Lead/Plan**: sau `clarification_checkpoint`, plan-agent tạo plan, plan-reviewer phản biện, plan-finalizer tạo FinalPlan.
 - **Implement**: chỉ implement sau khi user approve FinalPlan.
 - **Review/Verify**: code-reviewer + orchestrator kiểm test/review.
 
-Workflow record typed artifact cho intake, explore, scope, plan draft, plan review, final plan, implementation, code review, done approval và commit approval.
+Workflow record typed artifact cho intake, explore, scope, clarification checkpoint, plan draft, plan review, final plan, implementation, code review, done approval và commit approval.
 
 ### 3. Orchestration theo vai trò
 
 Thay vì một agent làm tất cả, workflow chia trách nhiệm:
 
-- `orchestrator-agent`: chuẩn hóa task, hỏi user, tổng hợp, kiểm gate.
+- `orchestrator-agent`: chuẩn hóa task, hỏi user bằng `workflow_clarify_scope`, tổng hợp, kiểm gate.
 - `backend-explorer`: hiểu backend/core/runtime.
 - `frontend-explorer`: hiểu UI/docs/frontend surface.
 - `research-agent`: web + GitHub research cho API, production reference code/structure, bug/error info, và cách xử lý đúng.
@@ -165,12 +165,16 @@ flowchart TD
   C --> BE
   C --> FE
   C --> RE
-  BE --> S[Scope decision]
+  BE --> S[Scope decision: options/tradeoffs]
   FE --> S
   RE --> S
-  S --> SQ{Cần hỏi user để rõ scope?}
-  SQ -- Có --> C
-  SQ -- Không --> PD[plan-agent: plan draft]
+  S --> WCS[workflow_clarify_scope: user choice]
+  WCS --> FRQ{Cần focused research?}
+  FRQ -- Có --> FR[Research lựa chọn đã chọn]
+  FR --> FU[Follow-up settings/constraints]
+  FRQ -- Không --> FU
+  FU --> CP[Ready clarification_checkpoint]
+  CP --> PD[plan-agent: plan draft]
 
   subgraph PL[Planning gate]
     PD --> PR[plan-reviewer]
@@ -199,6 +203,8 @@ flowchart TD
   CM -- Có --> GC[Git commit]
   GC --> END
 ```
+
+Sau Explore, checkpoint này là bắt buộc mọi lần. Orchestrator phải trình bày options/tradeoffs, lấy lựa chọn của user, có thể research sâu lựa chọn đó, hỏi tiếp settings/constraints, rồi chỉ cho `plan-agent` chạy khi `clarification_checkpoint` đã ready.
 
 Research-agent trong Full workflow phải tìm thêm từ web/GitHub khi cần:
 
@@ -239,12 +245,16 @@ flowchart TD
   C --> BE
   C --> FE
   C --> RE
-  BE --> S[Scope decision]
+  BE --> S[Scope decision: options/tradeoffs]
   FE --> S
   RE --> S
-  S --> SQ{Cần hỏi user để rõ scope?}
-  SQ -- Có --> C
-  SQ -- Không --> PD[plan-agent: plan draft]
+  S --> WCS[workflow_clarify_scope: user choice]
+  WCS --> FRQ{Cần focused research?}
+  FRQ -- Có --> FR[Research lựa chọn đã chọn]
+  FR --> FU[Follow-up settings/constraints]
+  FRQ -- Không --> FU
+  FU --> CP[Ready clarification_checkpoint]
+  CP --> PD[plan-agent: plan draft]
 
   subgraph PL[Planning gate]
     PD --> PR[plan-reviewer]

@@ -6,17 +6,24 @@ This contract keeps workflow sessions evidence-first, simple, and reviewable.
 
 1. Intake the request.
 2. Check CodeGraph status and gather CodeGraph evidence for structural context.
-3. Ask `plan-agent` for a PlanDraft.
-4. Ask `plan-reviewer` to review the real PlanDraft.
-5. Synthesize the FinalPlan.
-6. Get explicit user approval with `workflow_approve_plan`.
-7. Implement only the approved scope.
-8. Run code review.
-9. Verify from the package directory.
+3. Run the mandatory Explore agents: `backend-explorer`, `frontend-explorer`, and `research-agent`.
+4. Record `backend_explore`, `frontend_explore`, `research_explore`, then synthesize `scope_decision` with options/tradeoffs.
+5. Before `plan-agent`, call `workflow_clarify_scope` for a constructive clarification checkpoint: show options/tradeoffs, collect the user choice, and ask follow-up settings/constraints.
+6. If the chosen option needs proof, run the smallest focused research/explorer pass, then call `workflow_clarify_scope` again for the follow-up.
+7. Continue only after a ready `clarification_checkpoint` exists: `readyToPlan: true` and no unresolved constraints.
+8. Ask `plan-agent` for a PlanDraft.
+9. Ask `plan-reviewer` to review the real PlanDraft.
+10. Synthesize the FinalPlan.
+11. Get explicit user approval with `workflow_approve_plan`.
+12. Implement only the approved scope.
+13. Run code review.
+14. Verify from the package directory.
 
 Do not run `plan-reviewer` in parallel with `plan-agent` when the reviewer needs
 the PlanDraft. If the reviewer is missing a PlanDraft, diff, test result, or other
 concrete artifact, it must call `workflow_break` instead of reviewing assumptions.
+Do not run `plan-agent` before the post-Explore `clarification_checkpoint`; the
+checkpoint is mandatory, not conditional on obvious ambiguity.
 
 ## Sub-agent operating contract
 
@@ -58,6 +65,7 @@ Final reports for non-trivial workflow work should include:
 | Requirement | File/Test/Doc | Verification | Evidence |
 | --- | --- | --- | --- |
 | CodeGraph-first | CodeGraph context/status | CodeGraph evidence id | `evd_...` |
+| Post-Explore clarification | `workflow_clarify_scope` + `clarification_checkpoint` | ready checkpoint before `plan-agent` | artifact/evidence ids |
 | Plan before review | PlanDraft then reviewer result | sub-agent task ids | `ses_...` |
 | Four principles | prompt/docs/test | workflow tests | command output |
 | Break/resume | protocol/runtime test | `bun test test/workflow` | command output |
