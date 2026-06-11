@@ -738,6 +738,7 @@ export const McpDebugCommand = effectCmd({
         const response = await fetch(serverConfig.url, {
           method: "POST",
           headers: {
+            ...serverConfig.headers,
             "Content-Type": "application/json",
             Accept: "application/json, text/event-stream",
           },
@@ -786,6 +787,7 @@ export const McpDebugCommand = effectCmd({
           // Try creating transport with auth provider to trigger discovery
           const transport = new StreamableHTTPClientTransport(new URL(serverConfig.url), {
             authProvider,
+            requestInit: serverConfig.headers ? { headers: serverConfig.headers } : undefined,
           })
 
           try {
