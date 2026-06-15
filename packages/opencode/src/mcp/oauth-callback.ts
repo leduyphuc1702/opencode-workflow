@@ -29,6 +29,15 @@ const HTML_SUCCESS = `<!DOCTYPE html>
 </body>
 </html>`
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;")
+}
+
 const HTML_ERROR = (error: string) => `<!DOCTYPE html>
 <html>
 <head>
@@ -45,7 +54,7 @@ const HTML_ERROR = (error: string) => `<!DOCTYPE html>
   <div class="container">
     <h1>Authorization Failed</h1>
     <p>An error occurred during authorization.</p>
-    <div class="error">${error}</div>
+    <div class="error">${escapeHtml(error)}</div>
   </div>
 </body>
 </html>`
@@ -93,7 +102,7 @@ function handleRequest(req: import("http").IncomingMessage, res: import("http").
   if (!state) {
     const errorMsg = "Missing required state parameter - potential CSRF attack"
     log.error("oauth callback missing state parameter", { url: url.toString() })
-    res.writeHead(400, { "Content-Type": "text/html" })
+    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
     res.end(HTML_ERROR(errorMsg))
     return
   }
@@ -107,13 +116,13 @@ function handleRequest(req: import("http").IncomingMessage, res: import("http").
       cleanupStateIndex(state)
       pending.reject(new Error(errorMsg))
     }
-    res.writeHead(200, { "Content-Type": "text/html" })
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
     res.end(HTML_ERROR(errorMsg))
     return
   }
 
   if (!code) {
-    res.writeHead(400, { "Content-Type": "text/html" })
+    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
     res.end(HTML_ERROR("No authorization code provided"))
     return
   }
@@ -122,7 +131,7 @@ function handleRequest(req: import("http").IncomingMessage, res: import("http").
   if (!pendingAuths.has(state)) {
     const errorMsg = "Invalid or expired state parameter - potential CSRF attack"
     log.error("oauth callback with invalid state", { state, pendingStates: Array.from(pendingAuths.keys()) })
-    res.writeHead(400, { "Content-Type": "text/html" })
+    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
     res.end(HTML_ERROR(errorMsg))
     return
   }
@@ -134,7 +143,7 @@ function handleRequest(req: import("http").IncomingMessage, res: import("http").
   cleanupStateIndex(state)
   pending.resolve(code)
 
-  res.writeHead(200, { "Content-Type": "text/html" })
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
   res.end(HTML_SUCCESS)
 }
 
