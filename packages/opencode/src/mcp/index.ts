@@ -726,7 +726,10 @@ export const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
       return yield* collectFromConnected(
         s,
-        (c) => (c.getServerCapabilities()?.prompts ? c.listPrompts().then((r) => r.prompts) : Promise.resolve([])),
+        (c) =>
+          c.getServerCapabilities()?.prompts
+            ? c.listPrompts(undefined, { timeout: DEFAULT_TIMEOUT }).then((r) => r.prompts)
+            : Promise.resolve([]),
         "prompts",
       )
     })
@@ -736,7 +739,9 @@ export const layer = Layer.effect(
       return yield* collectFromConnected(
         s,
         (c) =>
-          c.getServerCapabilities()?.resources ? c.listResources().then((r) => r.resources) : Promise.resolve([]),
+          c.getServerCapabilities()?.resources
+            ? c.listResources(undefined, { timeout: DEFAULT_TIMEOUT }).then((r) => r.resources)
+            : Promise.resolve([]),
         "resources",
       )
     })
