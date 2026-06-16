@@ -93,3 +93,33 @@ Adopt later as a deliberate, separate migration if desired:
 - Upstream added NEW packages the fork lacks: `cli, server, tui, stats, effect-sqlite-node`. `packages/tui` = new v2 TUI; fork's TUI is still under `packages/opencode/src/cli/cmd/tui` + `packages/ui`. Skip commits that touch `packages/tui`.
 - Fork refactored provider registry to `packages/core/src/plugin/provider/index` (upstream still inline list) → provider-add commits conflict there.
 - V2 field renames in progress upstream (`provider.endpoint`→`provider.api`, `ConfigMCP`→`ConfigMCPV1`) → core/mcp commits often need translation.
+
+## MILESTONE 1 COMPLETE — clean inheritance (2026-06-16)
+
+**80 upstream commits cherry-picked & verified** onto `sync/upstream-anomalyco` (88 commits incl. fixups/revert/docs).
+Applied by subsystem: opencode 31, tui 25, plugin 3, mcp 8, core/session/project/llm/httpapi/lsp/config/provider misc.
+
+**Verification (all PASS, 0 failures):**
+- typecheck: opencode, core, llm, ui, sdk, plugin — all clean.
+- tests: config 94, permission+tool 400, provider/transform 258, openai-responses 47, mcp 49, security+workflow+codegraph (mod suites) 82, provider/session/lsp/snapshot/format/file/agent 1001. (~1931 pass, 0 fail.) Mod is intact.
+- TUI runtime tests are TTY-dependent (hang headless); typecheck is the gate for TUI changes.
+
+**Highlights inherited:** Claude Fable reasoning, MiniMax M3, Cohere North, vLLM/OpenRouter reasoning, adaptive reasoning (opus 4.7+ vertex/gateway/sap-ai-core), normalize OpenAI tool schemas, gate reasoning summaries; 8 MCP robustness fixes; 25 TUI fixes (paste/wide-char, spinner, diff scroll, Vue highlight, subagent rows, session-dir routing, autocomplete...); Windows ConPTY pid 0, SSE retry, prevent destructive edit matches, JDTLS Java Maven, signed-thinking anthropic reorder, snapshot perf, enterprise auth recovery, +more.
+
+## Reconciliation roadmap (remaining "essence", deferred — needs focused passes / user judgment)
+
+| Pass | Scope | Why deferred | Recommend |
+|------|-------|--------------|-----------|
+| **A. Dep-bump** | Gemini replay #30463, OpenRouter 2.9.0 #30800, Anthropic fallback #31611, Bedrock+Mantle #30464/#31001 | Need SDK version bumps + reinstall; patch-version mismatch | Mechanical-ish; do with reinstall + verify. Bedrock Mantle = niche. |
+| **B. OpenAI WebSocket transport** | #29477 + 6 follow-ups | Needs `ws` dep + session/retry reconciliation | Cohesive opt-in feature; port whole or skip (fork uses HTTP responses + 9router). |
+| **C. MCP reconciliation** | 13 commits (paginate, failure-safe, timeouts, structured output, client roots, OAuth callback...) | Fork MCP module diverged (no `paginate`, `ConfigMCP` vs `ConfigMCPV1`, tolerant-schema, capability-gated) | Holistic diff fork `mcp/` vs upstream; port net robustness. Medium value. |
+| **D. Desktop reconciliation** | 8 commits (updater, WSL, electron stack, attachments...) | Fork desktop diverged (OCU bundle, updater→fork repo, app removal) + touch `packages/app` | **User judgment** — protect updater/OCU. |
+| **E. ACP** | 11 commits | Upstream rewrote acp→acp-next; fork on old acp | **User judgment** — adopt rewrite vs keep, or skip (low priority for fork). |
+| **F. V2 migration** | 75 Class-B + ~16 leftovers (v2 session runtime, location layer, project copies, fff search, native API, command/skill registry) | In-flight upstream architecture; conflicts with mod | **Out of scope** for "inherit bugfix"; separate deliberate migration if desired. |
+| **G. SDK-regen** | content-filter finish reason #31745 | Touches generated SDK types/openapi | Apply source + regenerate SDK. |
+
+Deferred detail: see `/tmp/sync/deferred.txt` (session-local).
+
+## Progress log (cont.)
+
+- 2026-06-16: **Batches 4-8 processed.** Batch 4 (infra) 26 landed/28 deferred; Batch 5 (websocket) deferred whole; Batch 6 (desktop) deferred whole; Batch 7 (acp) deferred whole; Batch 8 (V2 leftovers) 3 landed/16 deferred. **Milestone 1 complete & verified.** Remaining work = reconciliation roadmap above (mostly user-judgment / dedicated passes).
