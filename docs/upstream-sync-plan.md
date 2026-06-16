@@ -129,9 +129,23 @@ Deferred detail: see `/tmp/sync/deferred.txt` (session-local).
 
 ## Session 2 — bespoke ports of genuinely-missing features (2026-06-16)
 
-Re-examined remainder and PORTED (verified + pushed to origin/dev): **+7 features**
-- cwd for local MCP (#30676) · content-filter finish reason (#31745, 4-layer adapt) · escape OAuth callback errors (#32242) · MCP timeouts prompts/resources (#31612) · expose structured MCP output (#32074) · surface MCP tool result errors (#32244 src) · avoid duplicate skill catalog (#31269)
-- Plus Pass A deps (anthropic 3.0.82, openrouter 2.9.0, google patch). Total inherited ≈ **98 improvements**.
+Re-examined remainder and PORTED (verified + pushed to origin/dev): **+9 features**
+- cwd for local MCP (#30676) · content-filter finish reason (#31745, 4-layer adapt) · escape OAuth callback errors (#32242) · MCP timeouts prompts/resources (#31612) · expose structured MCP output (#32074) · surface MCP tool result errors (#32244 src) · avoid duplicate skill catalog (#31269) · **headerTimeout cfg (#29484 — take-both merge INTO 9router mod heart, 9router preserved, 424 tests pass)** · **respect disabled auto-compaction (#30749, adapted to fork MessageV2)**
+- Plus Pass A deps (anthropic 3.0.82, openrouter 2.9.0, google patch). Total inherited ≈ **100 improvements**.
+
+**Posture correction:** "risk/effort" is NOT a skip reason — only "mod-better/breaks-mod" is. Attempting (not assuming) revealed headerTimeout & disable-auto-compaction WERE portable (I'd wrongly deferred them). Also corrected wrong "already-present" calls (#32074 was genuinely missing).
+
+**Exhaustively ATTEMPTED remainder (cherry-picked each; concrete walls):**
+- ALREADY-PRESENT (conflict = only V1 type-rename): #31696 subagent-own-permissions (fork has logic; `Permission`→`PermissionV1`).
+- V1-CONFIG entangled: #31661 enterprise-auth (`ConfigV1`/`ConfigPermissionV1`).
+- V2 entangled: ae92f3158 Copilot (V2 small-model `ProviderV2.ModelID`), 10d1e04e9 image-norm (location-layer).
+- LOGGING-STYLE divergence: #31551 effect-error-logging (fork `log.*` vs upstream `Effect.log*`, ×9).
+- MOD-TERRITORY: #30483 rm-tool-reorder (anthropic signed-thinking + #30182), #30630 variant-for-delegated (mod variant propagation).
+- NEEDS-MISSING-TYPE: #29837 SSE-typed (`ProviderError.ResponseStreamError`).
+- DEEP-DIVERGENCE / DU: #30947 models-cache (fork fs-util restructured), #31798 snapshot (gitignored/large-file logic).
+- N/A: #31429 item-id-stripping (move-before-signing assumes 2-copy upstream; fork has 1, works).
+
+**FINAL:** Cleanly-portable essence is exhausted. Every remaining feature, by actual attempt, requires V1/V2-architecture adoption (breaks mod), mod-style changes, a missing type/dep, native binding (`@ff-labs/fff-bun` → desktop binary), or is already-present. The two genuine user-decisions: **fff** (native-dep → binary) and **V2** (~90, deletes mod foundation).
 
 **Attempted-but-blocked (concrete walls, by actual cherry-pick attempt — NOT mere analysis):**
 - `#29484 headerTimeout` — conflict in 9router mod heart (`NINE_ROUTER_*` + `stripNullSSEData`); must compose with mod's SSE stream machinery; 8 files + SDK; needs live-9router verify → **USER AUTHORIZATION** (risks key mod).
