@@ -157,3 +157,9 @@ Re-examined remainder and PORTED (verified + pushed to origin/dev): **+9 feature
 - `desktop themes/WSL/multi-server` — touch `packages/app` (being removed). `ACP` — upstream rewrote 28 files.
 
 **Conclusion:** Every remaining feature, by actual attempt, requires (a) user authorization to risk the mod's heart / desktop binary, (b) adding a dependency/config-field the fork deliberately lacks, or (c) deleting the mod (V2). Inheritance is complete to the maximum that preserves the working mod per the goal's "bỏ qua nơi mod tốt hơn" clause.
+
+## FINAL DECISION (user, 2026-06-16)
+User chose **"Chốt ~100 (giữ mod)"**: accept the ~100 mod-compatible upstream improvements as fulfilling
+the goal; do NOT pursue the V2 migration (would rebuild/break the mod) or fff (native-dep into shipped binary).
+This defines "tất cả tinh hoa" as "all essence inheritable while preserving the mod" — ACHIEVED.
+Deferred V2/fff remain documented above as optional future projects requiring explicit go-ahead.
