@@ -49,7 +49,7 @@ Adopt later as a deliberate, separate migration if desired:
 
 | # | Batch | ~Commits | Risk | Status |
 |---|-------|----------|------|--------|
-| 1a | Providers & models (reasoning, new models, provider bumps) | ~22 | low | IN PROGRESS |
+| 1a | Providers & models (reasoning, new models, provider bumps) | ~22 | low | DONE — 19 landed, 9 deferred |
 | 1b | New providers + transport headers (Snowflake, X-Session-Id, item-id) | ~6 | med | todo |
 | 1c | OpenAI websocket transport cluster | ~8 | med (9router responses overlap) | todo |
 | 2 | MCP robustness | 12 | low | todo |
@@ -61,6 +61,27 @@ Adopt later as a deliberate, separate migration if desired:
 | 8 | opencode core misc (edit safety, SSE retry, shell race, ...) | ~40 | high (mod lives here) | todo |
 | 9 | app co-touch commits | ~10 | n/a | mostly skip |
 
+## Deferred (revisit in dedicated passes)
+
+**Dependency-bump pass** (bump dep + single `bun install`):
+- #30463 Gemini replay patch — needs `@ai-sdk/google` 3.0.63→3.0.73
+- #30464 bump bedrock + Mantle support (aws-bedrock SDK)
+- #30800 bump `@openrouter/ai-sdk-provider` 2.9.0
+- #31611 Anthropic fallback responses (dep)
+
+**Bedrock Mantle feature chain** (do together): #30464 + #31001 (honor Mantle config; needs `selectBedrockMantleLanguageModel`).
+
+**Niche / skipped**: #29901 + #31700 Snowflake Cortex provider (conflicts fork provider registry `provider/index`).
+
+**V2-entangled (Class B-ish)**: #31004 scope Vertex transforms (fork uses `provider.endpoint`, upstream renamed to `provider.api`).
+
+**SDK-regen pass** (apply source + regenerate SDK types/openapi): #31745 content-filter finish reason.
+
+**Resolution notes**:
+- #30973 gate reasoning summaries: took upstream source gating; preserved fork's `9router forceReasoning`; dropped upstream's V2-shaped Bedrock Mantle test.
+- f011d7712 normalize tool schemas: kept the tool-schema test; dropped bundled system-update test (uses `Message.system` absent in fork).
+
 ## Progress log
 
-- 2026-06-16: Recon complete. Restored wiped `packages/` (approved). Branch created. Deps installed. Baseline typecheck PASS. Triage done. Starting Batch 1a.
+- 2026-06-16: Recon complete. Restored wiped `packages/` (approved). Branch created. Deps installed. Baseline typecheck PASS. Triage done.
+- 2026-06-16: **Batch 1a DONE** — 19 provider/model commits landed (incl. Claude Fable reasoning, MiniMax M3, Cohere North, adaptive reasoning opus 4.7+). opencode+llm typecheck PASS; transform 258/258, openai-responses 47/47 tests pass. 9 deferred (see above). Starting Batch 2 (MCP).
