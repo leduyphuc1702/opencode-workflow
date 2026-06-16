@@ -183,6 +183,13 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
           timeout,
         },
       )
+      if (result.isError)
+        throw new Error(
+          (result.content as Array<{ type: string; text?: string }>)
+            .flatMap((item) => (item.type === "text" && typeof item.text === "string" ? [item.text] : []))
+            .filter((text) => text.trim())
+            .join("\n\n") || "MCP tool returned an error",
+        )
       if (result.structuredContent === undefined || result.structuredContent === null) return result
       return {
         ...result,
