@@ -1528,6 +1528,13 @@ export const layer = Layer.effect(
 
             const finished = handle.message.finish && !["tool-calls", "unknown"].includes(handle.message.finish)
             if (finished && !handle.message.error) {
+              if (handle.message.finish === "content-filter") {
+                handle.message.error = new MessageV2.ContentFilterError({
+                  message: "The response was blocked by the provider's content filter",
+                }).toObject()
+                yield* sessions.updateMessage(handle.message)
+                return "break" as const
+              }
               if (format.type === "json_schema") {
                 handle.message.error = new MessageV2.StructuredOutputError({
                   message: "Model did not produce structured output",
