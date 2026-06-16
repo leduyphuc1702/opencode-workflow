@@ -1,3 +1,4 @@
+import path from "path"
 import { dynamicTool, type Tool, jsonSchema, type JSONSchema7 } from "ai"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
@@ -425,7 +426,8 @@ export const layer = Layer.effect(
       mcp: ConfigMCP.Info & { type: "local" },
     ) {
       const [cmd, ...args] = mcp.command
-      const cwd = yield* InstanceState.directory
+      const baseDir = yield* InstanceState.directory
+      const cwd = mcp.cwd ? path.resolve(baseDir, mcp.cwd) : baseDir
       const transport = new StdioClientTransport({
         stderr: "pipe",
         command: cmd,
