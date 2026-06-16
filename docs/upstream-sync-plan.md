@@ -52,10 +52,10 @@ Adopt later as a deliberate, separate migration if desired:
 | 1a | Providers & models (reasoning, new models, provider bumps) | ~22 | low | DONE — 19 landed, 9 deferred |
 | 1b | New providers + transport headers (Snowflake, X-Session-Id, item-id) | ~6 | med | todo |
 | 1c | OpenAI websocket transport cluster | ~8 | med (9router responses overlap) | todo |
-| 2 | MCP robustness | 12 | low | todo |
+| 2 | MCP robustness | 12 | low | DONE — 8 landed, 13 deferred (MCP module diverged → reconciliation pass) |
 | 3 | LSP / snapshot / config / server / session (non-v2) | ~10 | low | todo |
 | 4 | Plugin / sdk / http-recorder | ~5 | low | todo |
-| 5 | TUI (packages/ui) isolated fixes | ~25 | med | todo |
+| 5 | TUI (packages/opencode/.../tui) isolated fixes | ~31 | med | DONE — 25 landed, 6 deferred/reverted |
 | 6 | Desktop (CAREFUL: protect updater→fork repo + OCU) | 8 | high | todo |
 | 7 | ACP (existing acp only, not acp-next) | ~9 | med | todo |
 | 8 | opencode core misc (edit safety, SSE retry, shell race, ...) | ~40 | high (mod lives here) | todo |
@@ -84,4 +84,12 @@ Adopt later as a deliberate, separate migration if desired:
 ## Progress log
 
 - 2026-06-16: Recon complete. Restored wiped `packages/` (approved). Branch created. Deps installed. Baseline typecheck PASS. Triage done.
-- 2026-06-16: **Batch 1a DONE** — 19 provider/model commits landed (incl. Claude Fable reasoning, MiniMax M3, Cohere North, adaptive reasoning opus 4.7+). opencode+llm typecheck PASS; transform 258/258, openai-responses 47/47 tests pass. 9 deferred (see above). Starting Batch 2 (MCP).
+- 2026-06-16: **Batch 1a DONE** — 19 provider/model commits landed (incl. Claude Fable reasoning, MiniMax M3, Cohere North, adaptive reasoning opus 4.7+). opencode+llm typecheck PASS; transform 258/258, openai-responses 47/47 tests pass. 9 deferred (see above).
+- 2026-06-16: **Batch 2 (MCP) DONE** — 8 landed (disconnect dynamic servers, serialize auth, non-interactive add, respect capabilities, abort signal, connection statuses, preserve auth headers, SDK protocol version) + 1 fixup (ConfigMCPV1→ConfigMCP). 13 deferred: fork's MCP module diverged (no `paginate`, `ConfigMCP` vs upstream `ConfigMCPV1`, tolerant-schema, capability-gated defs) → needs a holistic **MCP reconciliation** pass. opencode typecheck PASS, mcp tests 49/49.
+- 2026-06-16: **Batch 3 (TUI) ~DONE** — 25 landed, 5 deferred (conflict), 1 reverted (#30935 diff hunk nav needs `getHunkRowOffsets`/test-renderer infra). Fork TUI lives in `packages/opencode/src/cli/cmd/tui`. opencode+ui typecheck PASS.
+
+## Key structural findings
+
+- Upstream added NEW packages the fork lacks: `cli, server, tui, stats, effect-sqlite-node`. `packages/tui` = new v2 TUI; fork's TUI is still under `packages/opencode/src/cli/cmd/tui` + `packages/ui`. Skip commits that touch `packages/tui`.
+- Fork refactored provider registry to `packages/core/src/plugin/provider/index` (upstream still inline list) → provider-add commits conflict there.
+- V2 field renames in progress upstream (`provider.endpoint`→`provider.api`, `ConfigMCP`→`ConfigMCPV1`) → core/mcp commits often need translation.
