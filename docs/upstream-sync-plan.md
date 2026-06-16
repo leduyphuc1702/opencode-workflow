@@ -110,7 +110,7 @@ Applied by subsystem: opencode 31, tui 25, plugin 3, mcp 8, core/session/project
 
 | Pass | Scope | Why deferred | Recommend |
 |------|-------|--------------|-----------|
-| **A. Dep-bump** | Gemini replay #30463, OpenRouter 2.9.0 #30800, Anthropic fallback #31611, Bedrock+Mantle #30464/#31001 | Need SDK version bumps + reinstall; patch-version mismatch | Mechanical-ish; do with reinstall + verify. Bedrock Mantle = niche. |
+| **A. Dep-bump** | ✅ DONE A1 (Anthropic 3.0.82 #31611 + OpenRouter 2.9.0 #30800), A2 (Gemini patch @ai-sdk/google 3.0.73 #30463). A3 Bedrock Mantle #30464/#31001 = DEFER-niche (touches provider.ts/9router, fork doesn't use Bedrock Mantle). | done + verified | A3 on request only. |
 | **B. OpenAI WebSocket transport** | #29477 + 6 follow-ups | Needs `ws` dep + session/retry reconciliation | Cohesive opt-in feature; port whole or skip (fork uses HTTP responses + 9router). |
 | **C. MCP reconciliation** | 13 commits (paginate, failure-safe, timeouts, structured output, client roots, OAuth callback...) | Fork MCP module diverged (no `paginate`, `ConfigMCP` vs `ConfigMCPV1`, tolerant-schema, capability-gated) | Holistic diff fork `mcp/` vs upstream; port net robustness. Medium value. |
 | **D. Desktop reconciliation** | 8 commits (updater, WSL, electron stack, attachments...) | Fork desktop diverged (OCU bundle, updater→fork repo, app removal) + touch `packages/app` | **User judgment** — protect updater/OCU. |
@@ -123,3 +123,4 @@ Deferred detail: see `/tmp/sync/deferred.txt` (session-local).
 ## Progress log (cont.)
 
 - 2026-06-16: **Batches 4-8 processed.** Batch 4 (infra) 26 landed/28 deferred; Batch 5 (websocket) deferred whole; Batch 6 (desktop) deferred whole; Batch 7 (acp) deferred whole; Batch 8 (V2 leftovers) 3 landed/16 deferred. **Milestone 1 complete & verified.** Remaining work = reconciliation roadmap above (mostly user-judgment / dedicated passes).
+- 2026-06-16: **Pass A (dep-bump) DONE** — A1: @ai-sdk/anthropic 3.0.71→3.0.82 (#31611 fallback responses) + @openrouter/ai-sdk-provider 2.8.1→2.9.0 (#30800), verified provider+session 744 tests. A2: @ai-sdk/google 3.0.63→3.0.73 + vendored patch (#30463 Gemini empty-replay), verified session/llm 26 tests. A3 Bedrock Mantle deferred-niche. Branch now 91 commits ahead of dev, all green.
