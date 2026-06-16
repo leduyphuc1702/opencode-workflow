@@ -171,7 +171,7 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
     description: mcpTool.description ?? "",
     inputSchema: jsonSchema(schema),
     execute: async (args: unknown, options) => {
-      return client.callTool(
+      const result = await client.callTool(
         {
           name: mcpTool.name,
           arguments: (args || {}) as Record<string, unknown>,
@@ -183,6 +183,11 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
           timeout,
         },
       )
+      if (result.structuredContent === undefined || result.structuredContent === null) return result
+      return {
+        ...result,
+        content: [{ type: "text" as const, text: JSON.stringify(result.structuredContent) }],
+      }
     },
   })
 }
