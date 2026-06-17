@@ -6,6 +6,7 @@ import { UserAgentSettings } from "./user-agent-settings"
 import * as Log from "@opencode-ai/core/util/log"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
+import { Goal } from "./goal"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 import { ModelID, ProviderID } from "../provider/schema"
@@ -99,6 +100,10 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
 
+// Max judge-driven re-entries before a goal is force-cleared, so a model that
+// can never satisfy the condition (or a flaky judge) cannot loop forever.
+const MAX_GOAL_REACT = 12
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -130,6 +135,7 @@ export const layer = Layer.effect(
     const references = yield* Reference.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const goal = yield* Goal.Service
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -1314,6 +1320,99 @@ export const layer = Layer.effect(
         let step = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
+        // Stop-condition gate: if a /goal is active, an independent judge model
+        // reads the transcript when the loop tries to stop. If the goal is not
+        // met (and the re-entry cap is not exceeded) a synthetic user reminder is
+        // appended and the loop re-enters. Fail-open: any judge error allows stop.
+        const goalGate = Effect.fn("SessionPrompt.goalGate")(function* (user: MessageV2.User) {
+          const active = yield* goal.get(sessionID)
+          if (!active) return false
+
+          const transcriptMsgs = yield* MessageV2.filterCompactedEffect(sessionID)
+          // Anchor the verdict to the assistant turn the judge just evaluated.
+          const judgedMessageID = transcriptMsgs.findLast((m) => m.info.role === "assistant")?.info.id
+          let judgeFailed = false
+          const verdict = yield* goal
+            .evaluate({ condition: active.condition, msgs: transcriptMsgs, model: user.model })
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.gen(function* () {
+                  yield* slog.warn("goal judge failed; allowing stop", { cause: Cause.pretty(cause) })
+                  judgeFailed = true
+                  return { ok: true, reason: "judge error" } as Goal.Verdict
+                }),
+              ),
+            )
+
+          if (verdict.ok || verdict.impossible) {
+            yield* slog.info("goal satisfied; allowing stop", {
+              sessionID,
+              impossible: verdict.impossible === true,
+            })
+            yield* bus.publish(Goal.Event.Updated, {
+              sessionID,
+              goal: undefined,
+              lastVerdict: {
+                ...verdict,
+                attempt: active.react,
+                messageID: judgedMessageID,
+                error: judgeFailed ? true : undefined,
+              },
+            })
+            yield* goal.clear(sessionID)
+            return false
+          }
+
+          const count = yield* goal.bumpReact(sessionID)
+          if (count > MAX_GOAL_REACT) {
+            yield* slog.warn("goal hit MAX_GOAL_REACT cap; allowing stop", {
+              sessionID,
+              condition: active.condition,
+              count,
+            })
+            yield* bus.publish(Goal.Event.Updated, {
+              sessionID,
+              goal: undefined,
+              lastVerdict: { ...verdict, attempt: count, messageID: judgedMessageID },
+            })
+            yield* goal.clear(sessionID)
+            return false
+          }
+
+          yield* slog.info("goal not satisfied; re-entering", { sessionID, attempt: count })
+          yield* bus.publish(Goal.Event.Updated, {
+            sessionID,
+            goal: { condition: active.condition },
+            lastVerdict: { ...verdict, attempt: count, messageID: judgedMessageID },
+          })
+          const reentry = yield* sessions.updateMessage({
+            id: MessageID.ascending(),
+            role: "user" as const,
+            sessionID,
+            agent: user.agent,
+            model: user.model,
+            tools: user.tools,
+            format: user.format,
+            time: { created: Date.now() },
+          })
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: reentry.id,
+            sessionID,
+            type: "text",
+            synthetic: true,
+            text: [
+              "<system-reminder>",
+              `Your goal is not yet satisfied: "${active.condition}".`,
+              "A judge reviewed the transcript and reported what is still missing:",
+              verdict.reason,
+              "Keep working toward the goal. Do not stop until it is genuinely met or impossible.",
+              "</system-reminder>",
+            ].join("\n"),
+          } satisfies MessageV2.TextPart)
+          return true
+        })
+
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
           yield* slog.info("loop", { step })
@@ -1351,6 +1450,7 @@ export const layer = Layer.effect(
                 callID: orphan.callID,
               })
             }
+            if (yield* goalGate(lastUser)) continue
             yield* slog.info("exiting loop")
             break
           }
@@ -1594,6 +1694,24 @@ export const layer = Layer.effect(
       }
       const agentName = cmd.agent ?? input.agent
 
+      // /goal — set or clear a session-level stop-condition goal. The condition
+      // text becomes this turn's prompt (the agent starts pursuing it); the main
+      // runLoop then refuses to stop until the judge says it is satisfied.
+      if (input.command === Command.Default.GOAL) {
+        const condition = input.arguments.trim()
+        if (condition === "" || condition === "clear" || condition === "reset") {
+          yield* goal.clear(input.sessionID)
+          return yield* prompt({
+            sessionID: input.sessionID,
+            messageID: input.messageID,
+            agent: agentName ?? (yield* agents.defaultInfo()).name,
+            parts: [{ type: "text", text: "Goal cleared.", synthetic: true }],
+            noReply: true,
+          })
+        }
+        yield* goal.set(input.sessionID, condition)
+      }
+
       const raw = input.arguments.match(argsRegex) ?? []
       const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
       const templateCommand = yield* Effect.promise(async () => cmd.template)
@@ -1747,6 +1865,7 @@ export const defaultLayer = Layer.suspend(() =>
         Bus.layer,
         CrossSpawnSpawner.defaultLayer,
         RuntimeFlags.defaultLayer,
+        Goal.defaultLayer,
       ),
     ),
   ),

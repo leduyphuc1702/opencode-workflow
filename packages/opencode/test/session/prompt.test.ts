@@ -31,6 +31,7 @@ import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
+import { Goal } from "../../src/session/goal"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -219,6 +220,7 @@ function makePrompt(input?: { processor?: "blocking" }) {
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(Image.defaultLayer),
     Layer.provide(Reference.defaultLayer),
+    Layer.provide(Goal.defaultLayer),
     Layer.provide(summary),
     Layer.provideMerge(run),
     Layer.provideMerge(compact),

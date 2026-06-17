@@ -19,6 +19,7 @@ import path from "path"
 import { Session } from "@/session/session"
 import { LLM } from "../../src/session/llm"
 import { SessionPrompt } from "../../src/session/prompt"
+import { Goal } from "../../src/session/goal"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionSummary } from "../../src/session/summary"
 import { MessageV2 } from "../../src/session/message-v2"
@@ -168,6 +169,7 @@ function makeHttp() {
       Layer.provide(SessionRevert.defaultLayer),
       Layer.provide(Image.defaultLayer),
       Layer.provide(Reference.defaultLayer),
+      Layer.provide(Goal.defaultLayer),
       Layer.provide(SessionSummary.defaultLayer),
       Layer.provideMerge(run),
       Layer.provideMerge(compact),
