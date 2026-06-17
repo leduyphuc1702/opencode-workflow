@@ -11,6 +11,7 @@ import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Config } from "@/config/config"
 import { ConfigMarkdown } from "@/config/markdown"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { extractComposeBundle } from "./compose/extract"
 import { Glob } from "@opencode-ai/core/util/glob"
 import * as Log from "@opencode-ai/core/util/log"
 import { Discovery } from "./discovery"
@@ -50,6 +51,9 @@ export const Info = Schema.Struct({
   location: Schema.String,
   content: Schema.String,
   source: Schema.optional(Schema.Literals(["built-in", "local", "remote"])),
+  // Hidden skills (e.g. the compose bundle) are loadable by name but excluded
+  // from the available-skills listing offered to normal agents.
+  hidden: Schema.optional(Schema.Boolean),
 })
 export type Info = Schema.Schema.Type<typeof Info>
 
@@ -164,6 +168,7 @@ const add = Effect.fnUntraced(function* (
     location: match,
     content: md.content,
     source,
+    hidden: isRecord(md.data) && (md.data as { hidden?: unknown }).hidden === true ? true : undefined,
   }
   if (sourceInfo) {
     state.remoteSources[md.data.name] = sourceInfo
@@ -211,8 +216,23 @@ const discoverSkills = Effect.fnUntraced(function* (
   disableClaudeCodeSkills: boolean,
   directory: string,
   worktree: string,
+  disableComposeSkills: boolean,
 ) {
   const state: ScanState = { matches: new Set(), dirs: new Set(), remoteDirs: new Set(), remoteSources: {} }
+
+  // Extract the bundled compose skills to disk first so a user-disk skill with
+  // the same name can override them. They carry `hidden: true` frontmatter, so
+  // they stay loadable by name but out of the normal available-skills listing.
+  // Dynamically imported (like the Session import in add()) so the compose
+  // module's type graph does not bloat this file's static type-checking.
+  if (!disableComposeSkills) {
+    const composeRoot = yield* Effect.promise(() => extractComposeBundle()).pipe(
+      Effect.catch(() => Effect.succeed(undefined)),
+    )
+    if (composeRoot && (yield* fsys.isDir(composeRoot))) {
+      yield* scan(state, composeRoot, SKILL_PATTERN, { scope: "compose" })
+    }
+  }
 
   const externalDirs: string[] = []
   if (!disableExternalSkills) {
@@ -303,6 +323,7 @@ export const layer = Layer.effect(
           flags.disableClaudeCodeSkills,
           ctx.directory,
           ctx.worktree,
+          flags.disableComposeSkills,
         )
       }),
     )
@@ -361,7 +382,7 @@ export const layer = Layer.effect(
     const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
       const s = yield* InstanceState.get(state)
       const list = Object.values(s.skills)
-        .filter((skill) => skill.source !== "remote")
+        .filter((skill) => skill.source !== "remote" && !skill.hidden)
         .toSorted((a, b) => a.name.localeCompare(b.name))
       if (!agent) return list
       return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")

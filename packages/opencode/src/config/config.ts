@@ -229,6 +229,7 @@ export const Info = Schema.Struct({
       Schema.Struct({
         build: Schema.optional(ConfigAgent.Info),
         plan: Schema.optional(ConfigAgent.Info),
+        compose: Schema.optional(ConfigAgent.Info),
       }),
       [Schema.Record(Schema.String, ConfigAgent.Info)],
     ),
@@ -239,6 +240,7 @@ export const Info = Schema.Struct({
         // primary
         plan: Schema.optional(ConfigAgent.Info),
         build: Schema.optional(ConfigAgent.Info),
+        compose: Schema.optional(ConfigAgent.Info),
         // subagent
         general: Schema.optional(ConfigAgent.Info),
         explore: Schema.optional(ConfigAgent.Info),

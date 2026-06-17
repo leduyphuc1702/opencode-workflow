@@ -15,7 +15,21 @@ import fs from "fs/promises"
 
 const node = CrossSpawnSpawner.defaultLayer
 
-const it = testEffect(Layer.mergeAll(Skill.defaultLayer, node))
+// Compose skills are exercised in compose.test.ts; disable them here so these
+// external/config/remote-discovery assertions keep their pre-compose baseline.
+const it = testEffect(
+  Layer.mergeAll(
+    Skill.layer.pipe(
+      Layer.provide(Discovery.defaultLayer),
+      Layer.provide(Config.defaultLayer),
+      Layer.provide(Bus.layer),
+      Layer.provide(AppFileSystem.defaultLayer),
+      Layer.provide(Global.layer),
+      Layer.provide(RuntimeFlags.layer({ disableComposeSkills: true })),
+    ),
+    node,
+  ),
+)
 const itWithoutClaudeCodeSkills = testEffect(
   Layer.mergeAll(
     Skill.layer.pipe(
@@ -24,7 +38,7 @@ const itWithoutClaudeCodeSkills = testEffect(
       Layer.provide(Bus.layer),
       Layer.provide(AppFileSystem.defaultLayer),
       Layer.provide(Global.layer),
-      Layer.provide(RuntimeFlags.layer({ disableClaudeCodeSkills: true })),
+      Layer.provide(RuntimeFlags.layer({ disableClaudeCodeSkills: true, disableComposeSkills: true })),
     ),
     node,
   ),
@@ -37,7 +51,7 @@ const itWithoutExternalSkills = testEffect(
       Layer.provide(Bus.layer),
       Layer.provide(AppFileSystem.defaultLayer),
       Layer.provide(Global.layer),
-      Layer.provide(RuntimeFlags.layer({ disableExternalSkills: true })),
+      Layer.provide(RuntimeFlags.layer({ disableExternalSkills: true, disableComposeSkills: true })),
     ),
     node,
   ),

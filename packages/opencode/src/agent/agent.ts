@@ -17,6 +17,8 @@ import PROMPT_FRONTEND_AGENT_WORKFLOW from "./prompt/frontend-agent-workflow.txt
 import PROMPT_FRONTEND_EXPLORER_WORKFLOW from "./prompt/frontend-explorer-workflow.txt"
 import PROMPT_IMPLEMENTATION_AGENT_WORKFLOW from "./prompt/implementation-agent-workflow.txt"
 import PROMPT_ORCHESTRATOR_WORKFLOW from "./prompt/orchestrator-workflow.txt"
+import PROMPT_COMPOSE from "../session/prompt/compose.txt"
+import { composeSkillsBlock } from "@/skill/compose/extract"
 import PROMPT_PLAN_AGENT_WORKFLOW from "./prompt/plan-agent-workflow.txt"
 import PROMPT_PLAN_FINALIZER_WORKFLOW from "./prompt/plan-finalizer-workflow.txt"
 import PROMPT_PLAN_REVIEWER_WORKFLOW from "./prompt/plan-reviewer-workflow.txt"
@@ -140,6 +142,11 @@ export const layer = Layer.effect(
 
         const user = Permission.fromConfig(cfg.permission ?? {})
 
+        // Compose mode: system prompt = orchestration instructions + the list of
+        // (hidden) compose skills the agent may invoke by name. Block is cached.
+        const composeBlock = flags.disableComposeSkills ? "" : yield* Effect.promise(() => composeSkillsBlock())
+        const composePrompt = composeBlock ? `${PROMPT_COMPOSE}\n\n${composeBlock}` : PROMPT_COMPOSE
+
         const agents: Record<string, Info> = {
           "orchestrator-agent": {
             name: "orchestrator-agent",
@@ -210,6 +217,23 @@ export const layer = Layer.effect(
                   [path.join(".opencode", "plans", "*.md")]: "allow",
                   [path.relative(ctx.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
                 },
+              }),
+              user,
+            ),
+            mode: "primary",
+            native: true,
+          },
+          compose: {
+            name: "compose",
+            description:
+              "Compose mode. Orchestrates specialized skills (brainstorm, plan, tdd, debug, review, verify, merge, ...) into structured, disciplined workflows.",
+            options: {},
+            prompt: composePrompt,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                question: "allow",
+                skill: "allow",
               }),
               user,
             ),

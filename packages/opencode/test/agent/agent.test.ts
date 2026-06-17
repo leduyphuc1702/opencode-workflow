@@ -785,6 +785,7 @@ it.instance(
       agent: {
         build: { disable: true },
         plan: { disable: true },
+        compose: { disable: true },
         "orchestrator-agent": { disable: true },
       },
     },
