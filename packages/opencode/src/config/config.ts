@@ -169,6 +169,16 @@ export const Info = Schema.Struct({
       }),
     }),
   ).annotate({ description: "Session trajectory full-text search (history) configuration" }),
+  checkpoint: Schema.optional(
+    Schema.Struct({
+      task_archive_days: Schema.optional(Schema.Number).annotate({
+        description: "Days after a task is done/abandoned before it is archived out of the active list (default 7).",
+      }),
+      task_cleanup_days: Schema.optional(Schema.Number).annotate({
+        description: "@deprecated fallback for task_archive_days.",
+      }),
+    }),
+  ).annotate({ description: "Checkpoint / task-registry retention configuration" }),
   // User-facing plugin config is stored as Specs; provenance gets attached later while configs are merged.
   plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPlugin.Spec))),
   share: Schema.optional(Schema.Literals(["manual", "auto", "disabled"])).annotate({

@@ -20,6 +20,7 @@ import { Session } from "@/session/session"
 import { LLM } from "../../src/session/llm"
 import { SessionPrompt } from "../../src/session/prompt"
 import { Goal } from "../../src/session/goal"
+import { TaskGateState } from "@/task/gate-state"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionSummary } from "../../src/session/summary"
 import { MessageV2 } from "../../src/session/message-v2"
@@ -54,6 +55,7 @@ import { SessionRunState } from "../../src/session/run-state"
 import { SessionStatus } from "../../src/session/status"
 import { Snapshot } from "../../src/snapshot"
 import { ToolRegistry } from "@/tool/registry"
+import { TaskRegistry } from "@/task/registry"
 import { Truncate } from "@/tool/truncate"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -138,6 +140,7 @@ function makeHttp() {
   const todo = Todo.layer.pipe(Layer.provideMerge(deps))
   const registry = ToolRegistry.layer.pipe(
     Layer.provide(Skill.defaultLayer),
+    Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(RepositoryCache.defaultLayer),
@@ -169,7 +172,7 @@ function makeHttp() {
       Layer.provide(SessionRevert.defaultLayer),
       Layer.provide(Image.defaultLayer),
       Layer.provide(Reference.defaultLayer),
-      Layer.provide(Goal.defaultLayer),
+      Layer.provide(Layer.mergeAll(Goal.defaultLayer, TaskRegistry.defaultLayer, TaskGateState.defaultLayer)),
       Layer.provide(SessionSummary.defaultLayer),
       Layer.provideMerge(run),
       Layer.provideMerge(compact),

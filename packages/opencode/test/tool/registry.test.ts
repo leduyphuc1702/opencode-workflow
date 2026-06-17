@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "url"
 import { Effect, Layer, Result, Schema } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { ToolRegistry } from "@/tool/registry"
+import { TaskRegistry } from "@/task/registry"
 import { Tool } from "@/tool/tool"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -55,7 +56,7 @@ const registryLayer = (opts: RegistryLayerOptions = {}) =>
       Layer.provide(Skill.defaultLayer),
       Layer.provide(Agent.defaultLayer),
       Layer.provide(Session.defaultLayer),
-      Layer.provide(Layer.mergeAll(SessionStatus.defaultLayer, BackgroundJob.defaultLayer)),
+      Layer.provide(Layer.mergeAll(SessionStatus.defaultLayer, BackgroundJob.defaultLayer, TaskRegistry.defaultLayer)),
       Layer.provide(Provider.defaultLayer),
       Layer.provide(Layer.mergeAll(Git.defaultLayer, RepositoryCache.defaultLayer)),
       Layer.provide(Reference.defaultLayer),

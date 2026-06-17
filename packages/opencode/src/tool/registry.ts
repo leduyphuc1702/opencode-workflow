@@ -7,6 +7,8 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
+import { TaskRegistryTool } from "./task-registry"
+import { TaskRegistry } from "@/task/registry"
 import { TaskStatusTool } from "./task_status"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
@@ -116,6 +118,7 @@ const baseLayer: Layer.Layer<
   | Plugin.Service
   | Question.Service
   | Todo.Service
+  | TaskRegistry.Service
   | Agent.Service
   | Skill.Service
   | Session.Service
@@ -149,6 +152,7 @@ const baseLayer: Layer.Layer<
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
+    const taskRegistryTool = yield* TaskRegistryTool
     const taskStatus = yield* TaskStatusTool
     const read = yield* ReadTool
     const question = yield* QuestionTool
@@ -285,6 +289,7 @@ const baseLayer: Layer.Layer<
           edit: Tool.init(edit),
           write: Tool.init(writetool),
           task: Tool.init(task),
+          task_registry: Tool.init(taskRegistryTool),
           task_status: Tool.init(taskStatus),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
@@ -330,6 +335,7 @@ const baseLayer: Layer.Layer<
             tool.edit,
             tool.write,
             tool.task,
+            tool.task_registry,
             ...(flags.experimentalBackgroundSubagents ? [tool.task_status] : []),
             tool.fetch,
             tool.todo,
@@ -461,7 +467,7 @@ export const defaultLayer = Layer.suspend(() =>
       Layer.provide(Skill.defaultLayer),
       Layer.provide(Agent.defaultLayer),
       Layer.provide(Session.defaultLayer),
-      Layer.provide(Layer.mergeAll(SessionStatus.defaultLayer, BackgroundJob.defaultLayer)),
+      Layer.provide(Layer.mergeAll(SessionStatus.defaultLayer, BackgroundJob.defaultLayer, TaskRegistry.defaultLayer)),
       Layer.provide(Provider.defaultLayer),
       Layer.provide(Layer.mergeAll(Git.defaultLayer, RepositoryCache.defaultLayer)),
       Layer.provide(Reference.defaultLayer),

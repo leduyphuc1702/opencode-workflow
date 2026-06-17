@@ -7,6 +7,9 @@ import * as Log from "@opencode-ai/core/util/log"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Goal } from "./goal"
+import { TaskRegistry } from "@/task/registry"
+import { TaskGateState } from "@/task/gate-state"
+import { TaskGate, MAX_TASK_GATE_MAIN_REACT } from "@/task/gate"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 import { ModelID, ProviderID } from "../provider/schema"
@@ -136,6 +139,8 @@ export const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const goal = yield* Goal.Service
+    const taskRegistry = yield* TaskRegistry.Service
+    const taskGateState = yield* TaskGateState.Service
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -1320,6 +1325,56 @@ export const layer = Layer.effect(
         let step = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
+        // Task stop-gate: if the session has non-terminal tasks (open/in_progress)
+        // when the loop tries to stop, nudge the agent to finish or abandon them
+        // before stopping. Bounded by MAX_TASK_GATE_MAIN_REACT. Runs BEFORE the
+        // goal judge (cheap DB state settled before the expensive model call).
+        const taskGate = Effect.fn("SessionPrompt.taskGate")(function* (user: MessageV2.User) {
+          // Skip if the agent can't use the task_registry tool — a nudge to run
+          // it would be unsatisfiable and re-loop to cap.
+          const ag = yield* agents.get(user.agent).pipe(Effect.orElseSucceed(() => undefined))
+          if (ag && Permission.disabled(["task_registry"], ag.permission).has("task_registry")) return false
+          if (user.tools?.["task_registry"] === false) return false
+
+          const count = yield* taskGateState.get(sessionID)
+          const decision = yield* TaskGate.decide({
+            session_id: sessionID,
+            owner: undefined,
+            reactCount: count,
+            maxReact: MAX_TASK_GATE_MAIN_REACT,
+            mode: "main",
+          }).pipe(Effect.provideService(TaskRegistry.Service, taskRegistry))
+          if (!decision.needReentry) {
+            if (decision.capExceeded)
+              yield* slog.warn("task gate hit cap; allowing stop", {
+                sessionID,
+                incompleteTasks: decision.incompleteTasks,
+              })
+            yield* taskGateState.clear(sessionID)
+            return false
+          }
+          yield* taskGateState.bump(sessionID)
+          const reentry = yield* sessions.updateMessage({
+            id: MessageID.ascending(),
+            role: "user" as const,
+            sessionID,
+            agent: user.agent,
+            model: user.model,
+            tools: user.tools,
+            format: user.format,
+            time: { created: Date.now() },
+          })
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: reentry.id,
+            sessionID,
+            type: "text",
+            synthetic: true,
+            text: decision.reentryText,
+          } satisfies MessageV2.TextPart)
+          return true
+        })
+
         // Stop-condition gate: if a /goal is active, an independent judge model
         // reads the transcript when the loop tries to stop. If the goal is not
         // met (and the re-entry cap is not exceeded) a synthetic user reminder is
@@ -1450,6 +1505,7 @@ export const layer = Layer.effect(
                 callID: orphan.callID,
               })
             }
+            if (yield* taskGate(lastUser)) continue
             if (yield* goalGate(lastUser)) continue
             yield* slog.info("exiting loop")
             break
@@ -1866,6 +1922,8 @@ export const defaultLayer = Layer.suspend(() =>
         CrossSpawnSpawner.defaultLayer,
         RuntimeFlags.defaultLayer,
         Goal.defaultLayer,
+        TaskRegistry.defaultLayer,
+        TaskGateState.defaultLayer,
       ),
     ),
   ),

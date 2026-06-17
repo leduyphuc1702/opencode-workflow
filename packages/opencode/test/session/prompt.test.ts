@@ -42,6 +42,8 @@ import { SystemPrompt } from "../../src/session/system"
 import { Shell } from "../../src/shell/shell"
 import { Snapshot } from "../../src/snapshot"
 import { ToolRegistry } from "@/tool/registry"
+import { TaskRegistry } from "@/task/registry"
+import { TaskGateState } from "@/task/gate-state"
 import { Truncate } from "@/tool/truncate"
 import * as Log from "@opencode-ai/core/util/log"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -189,6 +191,7 @@ function makePrompt(input?: { processor?: "blocking" }) {
   const todo = Todo.layer.pipe(Layer.provideMerge(deps))
   const registry = ToolRegistry.layer.pipe(
     Layer.provide(Skill.defaultLayer),
+    Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(RepositoryCache.defaultLayer),
@@ -220,7 +223,7 @@ function makePrompt(input?: { processor?: "blocking" }) {
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(Image.defaultLayer),
     Layer.provide(Reference.defaultLayer),
-    Layer.provide(Goal.defaultLayer),
+    Layer.provide(Layer.mergeAll(Goal.defaultLayer, TaskRegistry.defaultLayer, TaskGateState.defaultLayer)),
     Layer.provide(summary),
     Layer.provideMerge(run),
     Layer.provideMerge(compact),
