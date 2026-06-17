@@ -161,6 +161,14 @@ export const Info = Schema.Struct({
     description:
       "Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.",
   }),
+  history: Schema.optional(
+    Schema.Struct({
+      kinds: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+        description:
+          "Message part kinds indexed for trajectory search (user_text, assistant_text, tool_input, tool_error, reasoning, tool_output). Empty array disables history indexing.",
+      }),
+    }),
+  ).annotate({ description: "Session trajectory full-text search (history) configuration" }),
   // User-facing plugin config is stored as Specs; provenance gets attached later while configs are merged.
   plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPlugin.Spec))),
   share: Schema.optional(Schema.Literals(["manual", "auto", "disabled"])).annotate({
