@@ -9,6 +9,8 @@ import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { TaskRegistryTool } from "./task-registry"
 import { TaskRegistry } from "@/task/registry"
+import { MemoryTool } from "./memory"
+import { Memory } from "@/memory"
 import { TaskStatusTool } from "./task_status"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
@@ -119,6 +121,7 @@ const baseLayer: Layer.Layer<
   | Question.Service
   | Todo.Service
   | TaskRegistry.Service
+  | Memory.Service
   | Agent.Service
   | Skill.Service
   | Session.Service
@@ -153,6 +156,7 @@ const baseLayer: Layer.Layer<
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
     const taskRegistryTool = yield* TaskRegistryTool
+    const memoryTool = yield* MemoryTool
     const taskStatus = yield* TaskStatusTool
     const read = yield* ReadTool
     const question = yield* QuestionTool
@@ -290,6 +294,7 @@ const baseLayer: Layer.Layer<
           write: Tool.init(writetool),
           task: Tool.init(task),
           task_registry: Tool.init(taskRegistryTool),
+          memory: Tool.init(memoryTool),
           task_status: Tool.init(taskStatus),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
@@ -336,6 +341,7 @@ const baseLayer: Layer.Layer<
             tool.write,
             tool.task,
             tool.task_registry,
+            tool.memory,
             ...(flags.experimentalBackgroundSubagents ? [tool.task_status] : []),
             tool.fetch,
             tool.todo,
@@ -467,7 +473,9 @@ export const defaultLayer = Layer.suspend(() =>
       Layer.provide(Skill.defaultLayer),
       Layer.provide(Agent.defaultLayer),
       Layer.provide(Session.defaultLayer),
-      Layer.provide(Layer.mergeAll(SessionStatus.defaultLayer, BackgroundJob.defaultLayer, TaskRegistry.defaultLayer)),
+      Layer.provide(
+        Layer.mergeAll(SessionStatus.defaultLayer, BackgroundJob.defaultLayer, TaskRegistry.defaultLayer, Memory.defaultLayer),
+      ),
       Layer.provide(Provider.defaultLayer),
       Layer.provide(Layer.mergeAll(Git.defaultLayer, RepositoryCache.defaultLayer)),
       Layer.provide(Reference.defaultLayer),

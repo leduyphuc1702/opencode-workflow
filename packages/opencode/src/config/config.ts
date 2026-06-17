@@ -169,6 +169,13 @@ export const Info = Schema.Struct({
       }),
     }),
   ).annotate({ description: "Session trajectory full-text search (history) configuration" }),
+  memory: Schema.optional(
+    Schema.Struct({
+      cc_index: Schema.optional(Schema.Boolean).annotate({
+        description: "Also index Claude Code memory files (~/.claude/projects/<slug>/memory/**) into the FTS index.",
+      }),
+    }),
+  ).annotate({ description: "Persistent memory (FTS5) configuration" }),
   checkpoint: Schema.optional(
     Schema.Struct({
       task_archive_days: Schema.optional(Schema.Number).annotate({
@@ -176,6 +183,12 @@ export const Info = Schema.Struct({
       }),
       task_cleanup_days: Schema.optional(Schema.Number).annotate({
         description: "@deprecated fallback for task_archive_days.",
+      }),
+      memory_reconcile_on_search: Schema.optional(Schema.Boolean).annotate({
+        description: "Reconcile the memory index from disk before each search (default true).",
+      }),
+      memory_search_score_floor: Schema.optional(Schema.Number).annotate({
+        description: "Relative BM25 score floor (ratio of top hit) for trimming common-word noise (default 0.15).",
       }),
     }),
   ).annotate({ description: "Checkpoint / task-registry retention configuration" }),

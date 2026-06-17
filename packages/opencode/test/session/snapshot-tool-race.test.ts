@@ -21,6 +21,7 @@ import { LLM } from "../../src/session/llm"
 import { SessionPrompt } from "../../src/session/prompt"
 import { Goal } from "../../src/session/goal"
 import { TaskGateState } from "@/task/gate-state"
+import { Memory } from "@/memory"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionSummary } from "../../src/session/summary"
 import { MessageV2 } from "../../src/session/message-v2"
@@ -140,7 +141,7 @@ function makeHttp() {
   const todo = Todo.layer.pipe(Layer.provideMerge(deps))
   const registry = ToolRegistry.layer.pipe(
     Layer.provide(Skill.defaultLayer),
-    Layer.provide(TaskRegistry.defaultLayer),
+    Layer.provide(Layer.mergeAll(TaskRegistry.defaultLayer, Memory.defaultLayer)),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(RepositoryCache.defaultLayer),
