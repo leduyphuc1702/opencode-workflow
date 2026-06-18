@@ -1,5 +1,5 @@
 import path from "path"
-import { pathToFileURL } from "url"
+import { pathToFileURL, fileURLToPath } from "url"
 import * as fs from "fs/promises"
 import { Global } from "@opencode-ai/core/global"
 import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
@@ -11,8 +11,30 @@ import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/instal
 // reachable graph and tips the whole-program type-checker (tsgo) over its
 // complexity ceiling (it then mis-resolves deeply-generic Effect code in the
 // llm package). The `.bundle/` directory ships in source alongside this file.
+// Resolve this module's directory across runtimes. Bun sets `import.meta.dir`;
+// Node ESM sets `import.meta.dirname` (20.11+); when neither is present (e.g.
+// the electron/asar bundle, where both are undefined) fall back to deriving it
+// from `import.meta.url`. Returns undefined only if nothing is resolvable.
+function moduleDir(): string | undefined {
+  const meta = import.meta as unknown as { dir?: string; dirname?: string; url?: string }
+  const dir = meta.dir ?? meta.dirname
+  if (typeof dir === "string" && dir.length > 0) return dir
+  if (typeof meta.url === "string" && meta.url.length > 0) {
+    try {
+      return path.dirname(fileURLToPath(meta.url))
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
 async function loadComposeBundle(): Promise<Record<string, Record<string, string>>> {
-  const base = path.resolve(import.meta.dir, ".bundle")
+  // No resolvable module dir (e.g. a bundled context that strips import.meta) ->
+  // treat the bundle as absent rather than throwing on path.resolve(undefined).
+  const dir = moduleDir()
+  if (!dir) return {}
+  const base = path.resolve(dir, ".bundle")
   const result: Record<string, Record<string, string>> = {}
   const top = await fs.readdir(base, { withFileTypes: true }).catch(() => [])
   const walk = async (dir: string, rel: string, out: Record<string, string>) => {

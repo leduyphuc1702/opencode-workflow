@@ -226,8 +226,12 @@ const discoverSkills = Effect.fnUntraced(function* (
   // Dynamically imported (like the Session import in add()) so the compose
   // module's type graph does not bloat this file's static type-checking.
   if (!disableComposeSkills) {
+    // catchCause (not catch): Effect.promise turns a rejected promise into a
+    // DEFECT, which Effect.catch (failures only) would miss — letting a compose
+    // extraction error crash skill discovery and 500 the agent list. Treat any
+    // compose failure as "no compose skills".
     const composeRoot = yield* Effect.promise(() => extractComposeBundle()).pipe(
-      Effect.catch(() => Effect.succeed(undefined)),
+      Effect.catchCause(() => Effect.succeed(undefined)),
     )
     if (composeRoot && (yield* fsys.isDir(composeRoot))) {
       yield* scan(state, composeRoot, SKILL_PATTERN, { scope: "compose" })
