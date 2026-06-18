@@ -9,7 +9,7 @@ import { History } from "@/history"
 import { layer as writerLayer, Service as WriterService } from "@/history/writer"
 import { layer as backfillLayer } from "@/history/backfill"
 import { HistoryFtsTable } from "@/history/fts.sql"
-import { buildFtsQuery } from "@/history/fts-query"
+import { buildFtsQuery, parseFields } from "@/history/fts-query"
 import { extract, type Kind } from "@/history/extract"
 import { testEffect, pollWithTimeout } from "../lib/effect"
 
@@ -51,6 +51,18 @@ describe("history.fts-query", () => {
   test("returns null for empty / punctuation-only", () => {
     expect(buildFtsQuery("")).toBeNull()
     expect(buildFtsQuery("   ,.!  ")).toBeNull()
+  })
+  test("parseFields extracts kind/tool/session, leaves rest", () => {
+    expect(parseFields("kind:tool_error timeout", ["kind", "tool", "session"])).toEqual({
+      fields: { kind: ["tool_error"] },
+      rest: "timeout",
+    })
+    expect(parseFields("tool:bash session:s2 build", ["kind", "tool", "session"])).toEqual({
+      fields: { tool: ["bash"], session: ["s2"] },
+      rest: "build",
+    })
+    // non-allowed prefix stays in rest
+    expect(parseFields("foo:bar baz", ["kind"])).toEqual({ fields: {}, rest: "foo:bar baz" })
   })
 })
 
@@ -150,6 +162,17 @@ describe("history.search (FTS5)", () => {
 
       const bySession = yield* history.search({ query: "unrelated", scope: "global", session_id: "s2" })
       expect(bySession.map((h) => h.part_id)).toEqual(["p3"])
+
+      // inline field prefixes (kind:/tool:/session:) mirror the structured args
+      const inlineKind = yield* history.search({ query: "kind:tool_input binary", scope: "global" })
+      expect(inlineKind.map((h) => h.part_id)).toEqual(["p2"])
+      const inlineTool = yield* history.search({ query: "tool:bash binary", scope: "global" })
+      expect(inlineTool.map((h) => h.part_id)).toEqual(["p2"])
+      const inlineSession = yield* history.search({ query: "session:s2 unrelated", scope: "global" })
+      expect(inlineSession.map((h) => h.part_id)).toEqual(["p3"])
+      // explicit arg overrides the inline prefix
+      const argOverride = yield* history.search({ query: "kind:tool_input binary", scope: "global", kind: "assistant_text" })
+      expect(argOverride.map((h) => h.part_id)).toEqual(["p1"])
 
       const empty = yield* history.search({ query: "   ,.! ", scope: "global" })
       expect(empty).toEqual([])

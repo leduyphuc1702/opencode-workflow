@@ -6,7 +6,7 @@ import type { MessageID } from "../session/schema"
 import { Config } from "@/config/config"
 import { Bus } from "@/bus"
 import { InstanceState } from "@/effect/instance-state"
-import { buildFtsQuery } from "./fts-query"
+import { buildFtsQuery, parseFields } from "./fts-query"
 import type { Kind } from "./extract"
 import { layer as writerLayer, Service as WriterService } from "./writer"
 import { layer as backfillLayer, Service as BackfillService } from "./backfill"
@@ -84,7 +84,11 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const search = Effect.fn("History.search")(function* (input: Parameters<Interface["search"]>[0]) {
-      const ftsQuery = buildFtsQuery(input.query)
+      // Pull inline `field:value` prefixes (kind:/tool:/session:) out of the
+      // query; explicit args win, prefixes fill in when the arg is absent.
+      // FTS5 needs a MATCH, so at least one non-field term must remain.
+      const { fields, rest } = parseFields(input.query, ["kind", "tool", "session"])
+      const ftsQuery = buildFtsQuery(rest)
       if (!ftsQuery) return []
 
       const limit = Math.min(input.limit ?? 10, HARD_CAP)
@@ -98,18 +102,20 @@ export const layer = Layer.effect(
         params.push(ctx.project.id)
       }
 
-      if (input.session_id) {
+      const sessionId = input.session_id ?? fields.session?.[0]
+      if (sessionId) {
         conditions.push("history_fts.session_id = ?")
-        params.push(input.session_id)
+        params.push(sessionId)
       }
-      if (input.kind) {
-        const kinds = Array.isArray(input.kind) ? input.kind : [input.kind]
+      const kinds = input.kind ? (Array.isArray(input.kind) ? input.kind : [input.kind]) : fields.kind
+      if (kinds && kinds.length > 0) {
         conditions.push(`history_fts.kind IN (${kinds.map(() => "?").join(",")})`)
         for (const k of kinds) params.push(k)
       }
-      if (input.tool_name) {
+      const toolName = input.tool_name ?? fields.tool?.[0]
+      if (toolName) {
         conditions.push("history_fts.tool_name = ?")
-        params.push(input.tool_name)
+        params.push(toolName)
       }
       if (input.time_after !== undefined) {
         conditions.push("history_fts.time_created >= ?")

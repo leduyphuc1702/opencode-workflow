@@ -35,3 +35,32 @@ export function buildFtsQuery(raw: string): string | null {
   const quoted = tokens.map((t) => `"${t.replaceAll('"', "")}"`)
   return quoted.join(" OR ")
 }
+
+// Extract inline `field:value` prefixes (e.g. "type:checkpoint deadlock") so a
+// single free-form query string can carry structured filters. Idea borrowed
+// from vibervn-context-engine's field-qualified search; here the fields map to
+// our existing FTS filter columns instead of code symbols.
+//
+// Only tokens whose field is in `allowed` are captured; everything else (plain
+// terms, and unknown `host:port`-style tokens like "postgres://h") stays in
+// `rest` verbatim, to be handed to buildFtsQuery. A field may repeat
+// ("kind:a kind:b") -> multiple values. Values cannot contain whitespace.
+export function parseFields(
+  raw: string,
+  allowed: ReadonlyArray<string>,
+): { fields: Record<string, string[]>; rest: string } {
+  const allow = new Set(allowed.map((a) => a.toLowerCase()))
+  const fields: Record<string, string[]> = {}
+  const rest: string[] = []
+  for (const tok of raw.split(/\s+/)) {
+    if (!tok) continue
+    const m = tok.match(/^([A-Za-z_]+):(.+)$/)
+    if (m && allow.has(m[1].toLowerCase())) {
+      const key = m[1].toLowerCase()
+      ;(fields[key] ??= []).push(m[2])
+    } else {
+      rest.push(tok)
+    }
+  }
+  return { fields, rest: rest.join(" ") }
+}

@@ -5,7 +5,28 @@ import { Global } from "@opencode-ai/core/global"
 import { Database } from "@/storage/db"
 import { Config } from "@/config/config"
 import { reconcileMemory } from "./reconcile"
-import { buildFtsQuery } from "./fts-query"
+import { buildFtsQuery, parseFields } from "./fts-query"
+
+// Type-weighted ranking: nudge curated, hand-authored memory above machine-
+// generated session state at comparable BM25. Faithful in spirit to vibervn-
+// context-engine's "downrank generated, surface hand-written" (no generated
+// CODE files here — the memory corpus is markdown, so the authorship signal
+// lives in `type`). Conservative multiplier; never excludes (the score floor +
+// always-keep-#1 still apply). Unknown types default to 1.0.
+const TYPE_WEIGHTS: Record<string, number> = {
+  // curated / hand-authored
+  memory: 1.0,
+  notes: 1.0,
+  free: 1.0,
+  // cc curated categories
+  feedback: 1.0,
+  project: 1.0,
+  reference: 1.0,
+  user: 1.0,
+  // machine-generated session state
+  checkpoint: 0.85,
+  progress: 0.85,
+}
 
 type SearchRow = {
   path: string
@@ -64,10 +85,13 @@ export const layer: Layer.Layer<Service, never, Config.Service> = Layer.effect(
       }
 
       const limit = input.limit ?? 10
-      // Build a token-level FTS5 query: punctuation becomes separators,
-      // each alphanumeric run becomes a phrase-quoted literal, OR-joined.
-      // See packages/opencode/src/memory/fts-query.ts for the rationale.
-      const ftsQuery = buildFtsQuery(input.query)
+      // Pull inline `field:value` prefixes (type:/scope:/scope_id:/path:) out of
+      // the query, then build the FTS5 MATCH from the remaining free terms.
+      // FTS5 needs a MATCH expression, so at least one non-field term is
+      // required — a query of only field prefixes returns [] (use Glob/Read to
+      // browse). See packages/opencode/src/memory/fts-query.ts for rationale.
+      const { fields, rest } = parseFields(input.query, ["type", "scope", "scope_id", "path"])
+      const ftsQuery = buildFtsQuery(rest)
       if (!ftsQuery) return []
 
       // OR-join means a doc matching only a common word still matches, but BM25
@@ -77,20 +101,29 @@ export const layer: Layer.Layer<Service, never, Config.Service> = Layer.effect(
       // dependent. The #1 result is ALWAYS kept. Default 0.15; 0 disables.
       const floorRatio = cfg.checkpoint?.memory_search_score_floor ?? 0.15
 
-      // Construct WHERE clauses for scope/scope_id/type filtering
+      // Construct WHERE clauses for scope/scope_id/type/path filtering.
+      // Explicit args win; inline field prefixes fill in when the arg is absent.
       const conditions: string[] = []
       const params: string[] = []
-      if (input.scope) {
+      const scope = input.scope ?? fields.scope?.[0]
+      if (scope) {
         conditions.push("memory_fts.scope = ?")
-        params.push(input.scope)
+        params.push(scope)
       }
-      if (input.scope_id) {
+      const scopeId = input.scope_id ?? fields.scope_id?.[0]
+      if (scopeId) {
         conditions.push("memory_fts.scope_id = ?")
-        params.push(input.scope_id)
+        params.push(scopeId)
       }
-      if (input.type) {
+      const type = input.type ?? fields.type?.[0]
+      if (type) {
         conditions.push("memory_fts.type = ?")
-        params.push(input.type)
+        params.push(type)
+      }
+      // path: substring filter (only from inline prefix; no dedicated arg).
+      for (const p of fields.path ?? []) {
+        conditions.push("memory_fts.path LIKE ?")
+        params.push(`%${p}%`)
       }
       const whereClause = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : ""
 
@@ -111,15 +144,19 @@ export const layer: Layer.Layer<Service, never, Config.Service> = Layer.effect(
       const fetchLimit = Math.min(limit * 3, 50)
       const rows = Database.Client().$client.query(sql).all(ftsQuery, ...params, fetchLimit) as SearchRow[]
 
-      // FTS5 bm25() returns lower = better; convert to higher = better for caller
-      const mapped = rows.map((r) => ({
-        path: r.path,
-        snippet: r.snippet,
-        score: -r.score,
-        scope: r.scope,
-        scope_id: r.scope_id,
-        type: r.type,
-      }))
+      // FTS5 bm25() returns lower = better; convert to higher = better, then
+      // apply the type weight (curated > machine-generated). Re-sort by the
+      // weighted score because the weighting can reorder same-BM25 ties.
+      const mapped = rows
+        .map((r) => ({
+          path: r.path,
+          snippet: r.snippet,
+          score: -r.score * (TYPE_WEIGHTS[r.type] ?? 1),
+          scope: r.scope,
+          scope_id: r.scope_id,
+          type: r.type,
+        }))
+        .sort((a, b) => b.score - a.score)
       if (mapped.length === 0) return []
       const topScore = mapped[0].score
       const cutoff = floorRatio > 0 ? topScore * floorRatio : -Infinity

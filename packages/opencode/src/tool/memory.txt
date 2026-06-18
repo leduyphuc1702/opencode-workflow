@@ -43,6 +43,20 @@ WHEN SEARCH RETURNS 0 (escalate, do not give up):
    history tool (raw conversation messages).
 Widen scope progressively: session → project → global → history.
 
+INLINE FIELD FILTERS:
+You can embed `field:value` prefixes in the query; they are stripped from
+the text match and applied as structured filters (explicit params override
+them). Supported: type: scope: scope_id: path:(substring)
+  "type:checkpoint deadlock"  -> checkpoints mentioning "deadlock"
+  "path:T5.3 closure"         -> hits whose path contains "T5.3"
+At least one non-field search term is still required (FTS needs a match);
+a query of only prefixes returns nothing — Glob/Read to browse instead.
+
+RANKING: results are BM25-ranked, then type-weighted so curated,
+hand-authored memory (memory/notes/free + cc feedback/project/reference)
+ranks above machine-generated session state (checkpoint/progress) at
+comparable relevance. Weighting only reorders; it never drops a hit.
+
 Actions:
 - search: OR-joined BM25 query, optional scope/scope_id/type filters
 
