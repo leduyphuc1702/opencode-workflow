@@ -3,6 +3,7 @@ import path from "path"
 import os from "os"
 import { Global } from "@opencode-ai/core/global"
 import { Database } from "@/storage/db"
+import { sql, type SQL } from "drizzle-orm"
 import { Config } from "@/config/config"
 import { reconcileMemory } from "./reconcile"
 import { buildFtsQuery, parseFields } from "./fts-query"
@@ -103,46 +104,36 @@ export const layer: Layer.Layer<Service, never, Config.Service> = Layer.effect(
 
       // Construct WHERE clauses for scope/scope_id/type/path filtering.
       // Explicit args win; inline field prefixes fill in when the arg is absent.
-      const conditions: string[] = []
-      const params: string[] = []
+      // Built as drizzle `sql` fragments + db.all() so this runs on BOTH the
+      // bun:sqlite (dev/tests) and node:sqlite (packaged desktop) drivers —
+      // $client.query() is bun:sqlite-only and throws ("not a function") under
+      // node:sqlite's DatabaseSync.
+      const conditions: SQL[] = []
       const scope = input.scope ?? fields.scope?.[0]
-      if (scope) {
-        conditions.push("memory_fts.scope = ?")
-        params.push(scope)
-      }
+      if (scope) conditions.push(sql`memory_fts.scope = ${scope}`)
       const scopeId = input.scope_id ?? fields.scope_id?.[0]
-      if (scopeId) {
-        conditions.push("memory_fts.scope_id = ?")
-        params.push(scopeId)
-      }
+      if (scopeId) conditions.push(sql`memory_fts.scope_id = ${scopeId}`)
       const type = input.type ?? fields.type?.[0]
-      if (type) {
-        conditions.push("memory_fts.type = ?")
-        params.push(type)
-      }
+      if (type) conditions.push(sql`memory_fts.type = ${type}`)
       // path: substring filter (only from inline prefix; no dedicated arg).
-      for (const p of fields.path ?? []) {
-        conditions.push("memory_fts.path LIKE ?")
-        params.push(`%${p}%`)
-      }
-      const whereClause = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : ""
+      for (const p of fields.path ?? []) conditions.push(sql`memory_fts.path LIKE ${`%${p}%`}`)
+      const whereExtra = conditions.length > 0 ? sql` AND ${sql.join(conditions, sql` AND `)}` : sql``
 
-      const sql = `
+      // Over-fetch (3x, capped) so the relative floor can trim common-word
+      // noise without starving the list when there ARE enough real hits.
+      const fetchLimit = Math.min(limit * 3, 50)
+      const query = sql`
         SELECT memory_fts.path, memory_fts.scope, memory_fts.scope_id, memory_fts.type,
                snippet(memory_fts_idx, 0, '<<', '>>', '...', 32) AS snippet,
                bm25(memory_fts_idx) AS score
         FROM memory_fts_idx
         JOIN memory_fts ON memory_fts.id = memory_fts_idx.rowid
-        WHERE memory_fts_idx MATCH ?
-        ${whereClause}
+        WHERE memory_fts_idx MATCH ${ftsQuery}
+        ${whereExtra}
         ORDER BY score
-        LIMIT ?
+        LIMIT ${fetchLimit}
       `
-
-      // Over-fetch (3x, capped) so the relative floor can trim common-word
-      // noise without starving the list when there ARE enough real hits.
-      const fetchLimit = Math.min(limit * 3, 50)
-      const rows = Database.Client().$client.query(sql).all(ftsQuery, ...params, fetchLimit) as SearchRow[]
+      const rows = Database.use((db) => db.all(query)) as SearchRow[]
 
       // FTS5 bm25() returns lower = better; convert to higher = better, then
       // apply the type weight (curated > machine-generated). Re-sort by the

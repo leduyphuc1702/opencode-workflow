@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect"
-import { and, asc, desc, eq, sql } from "drizzle-orm"
+import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm"
 import { Database } from "@/storage/db"
 import { MessageTable, PartTable } from "../session/session.sql"
 import type { MessageID } from "../session/schema"
@@ -92,42 +92,34 @@ export const layer = Layer.effect(
       if (!ftsQuery) return []
 
       const limit = Math.min(input.limit ?? 10, HARD_CAP)
-      const conditions: string[] = []
-      const params: (string | number)[] = []
+      // Built as drizzle `sql` fragments + db.all() so this runs on BOTH
+      // bun:sqlite (dev/tests) and node:sqlite (packaged desktop). The previous
+      // $client.query() path is bun:sqlite-only and throws ("not a function")
+      // under node:sqlite's DatabaseSync.
+      const conditions: SQL[] = []
 
       const scope = input.scope ?? "project"
       if (scope === "project") {
         const ctx = yield* InstanceState.context
-        conditions.push("history_fts.project_id = ?")
-        params.push(ctx.project.id)
+        conditions.push(sql`history_fts.project_id = ${ctx.project.id}`)
       }
 
       const sessionId = input.session_id ?? fields.session?.[0]
-      if (sessionId) {
-        conditions.push("history_fts.session_id = ?")
-        params.push(sessionId)
-      }
+      if (sessionId) conditions.push(sql`history_fts.session_id = ${sessionId}`)
       const kinds = input.kind ? (Array.isArray(input.kind) ? input.kind : [input.kind]) : fields.kind
       if (kinds && kinds.length > 0) {
-        conditions.push(`history_fts.kind IN (${kinds.map(() => "?").join(",")})`)
-        for (const k of kinds) params.push(k)
+        conditions.push(sql`history_fts.kind IN (${sql.join(
+          kinds.map((k) => sql`${k}`),
+          sql`, `,
+        )})`)
       }
       const toolName = input.tool_name ?? fields.tool?.[0]
-      if (toolName) {
-        conditions.push("history_fts.tool_name = ?")
-        params.push(toolName)
-      }
-      if (input.time_after !== undefined) {
-        conditions.push("history_fts.time_created >= ?")
-        params.push(input.time_after)
-      }
-      if (input.time_before !== undefined) {
-        conditions.push("history_fts.time_created <= ?")
-        params.push(input.time_before)
-      }
+      if (toolName) conditions.push(sql`history_fts.tool_name = ${toolName}`)
+      if (input.time_after !== undefined) conditions.push(sql`history_fts.time_created >= ${input.time_after}`)
+      if (input.time_before !== undefined) conditions.push(sql`history_fts.time_created <= ${input.time_before}`)
 
-      const whereClause = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : ""
-      const sqlText = `
+      const whereExtra = conditions.length > 0 ? sql` AND ${sql.join(conditions, sql` AND `)}` : sql``
+      const query = sql`
         SELECT history_fts.part_id, history_fts.session_id, history_fts.message_id,
                history_fts.project_id, history_fts.kind, history_fts.tool_name,
                history_fts.time_created,
@@ -135,12 +127,12 @@ export const layer = Layer.effect(
                bm25(history_fts_idx) AS score
         FROM history_fts_idx
         JOIN history_fts ON history_fts.rowid = history_fts_idx.rowid
-        WHERE history_fts_idx MATCH ?
-        ${whereClause}
+        WHERE history_fts_idx MATCH ${ftsQuery}
+        ${whereExtra}
         ORDER BY score
-        LIMIT ?
+        LIMIT ${limit}
       `
-      const rows = Database.Client().$client.query(sqlText).all(ftsQuery, ...params, limit) as Row[]
+      const rows = Database.use((db) => db.all(query)) as Row[]
       return rows.map((r) => ({
         part_id: r.part_id,
         session_id: r.session_id,
