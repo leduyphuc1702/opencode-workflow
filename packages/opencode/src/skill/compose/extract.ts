@@ -4,17 +4,21 @@ import * as fs from "fs/promises"
 import { Global } from "@opencode-ai/core/global"
 import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
 
-// Load the bundled compose skills from the colocated `.bundle/` directory.
+// Load the bundled compose skills from the `.bundle/` directory ON DISK.
 //
-// Deliberately uses only `fs/promises` (no sync `fs`, no separate macro module,
-// no gray-matter): each of those pulls a large/extra type surface into the
-// reachable graph and tips the whole-program type-checker (tsgo) over its
-// complexity ceiling (it then mis-resolves deeply-generic Effect code in the
-// llm package). The `.bundle/` directory ships in source alongside this file.
-// Resolve this module's directory across runtimes. Bun sets `import.meta.dir`;
-// Node ESM sets `import.meta.dirname` (20.11+); when neither is present (e.g.
-// the electron/asar bundle, where both are undefined) fall back to deriving it
-// from `import.meta.url`. Returns undefined only if nothing is resolvable.
+// The skills MUST stay on disk (read via fs at runtime), never inlined into a
+// .ts/.js module: a ~350KB data literal in the program tips the whole-program
+// type-checker (tsgo) over its complexity ceiling, surfacing spurious errors in
+// the llm package. So this module reads from one of two on-disk locations:
+//   1. <process.resourcesPath>/compose-bundle — the packaged desktop app, where
+//      electron-builder copies `.bundle` via extraResources (see
+//      packages/desktop/electron-builder.config.ts).
+//   2. <moduleDir>/.bundle — dev (Bun) and the source tree.
+// If neither is readable the bundle is treated as absent (compose degrades to
+// "no skills" rather than crashing).
+//
+// Deliberately uses only `fs/promises` (no sync `fs`, no gray-matter) for the
+// same tsgo-complexity reason.
 function moduleDir(): string | undefined {
   const meta = import.meta as unknown as { dir?: string; dirname?: string; url?: string }
   const dir = meta.dir ?? meta.dirname
@@ -29,12 +33,16 @@ function moduleDir(): string | undefined {
   return undefined
 }
 
-async function loadComposeBundle(): Promise<Record<string, Record<string, string>>> {
-  // No resolvable module dir (e.g. a bundled context that strips import.meta) ->
-  // treat the bundle as absent rather than throwing on path.resolve(undefined).
+function candidateBaseDirs(): string[] {
+  const dirs: string[] = []
+  const rp = (process as unknown as { resourcesPath?: string }).resourcesPath
+  if (typeof rp === "string" && rp.length > 0) dirs.push(path.join(rp, "compose-bundle"))
   const dir = moduleDir()
-  if (!dir) return {}
-  const base = path.resolve(dir, ".bundle")
+  if (dir) dirs.push(path.resolve(dir, ".bundle"))
+  return dirs
+}
+
+async function readBundleDir(base: string): Promise<Record<string, Record<string, string>>> {
   const result: Record<string, Record<string, string>> = {}
   const top = await fs.readdir(base, { withFileTypes: true }).catch(() => [])
   const walk = async (dir: string, rel: string, out: Record<string, string>) => {
@@ -53,6 +61,14 @@ async function loadComposeBundle(): Promise<Record<string, Record<string, string
   return result
 }
 
+async function loadComposeBundle(): Promise<Record<string, Record<string, string>>> {
+  for (const base of candidateBaseDirs()) {
+    const result = await readBundleDir(base)
+    if (Object.keys(result).length > 0) return result
+  }
+  return {}
+}
+
 let cached: Record<string, Record<string, string>> | undefined
 async function bundle(): Promise<Record<string, Record<string, string>>> {
   if (!cached) cached = await loadComposeBundle()
@@ -61,27 +77,30 @@ async function bundle(): Promise<Record<string, Record<string, string>>> {
 
 export async function extractComposeBundle(): Promise<string> {
   const root = path.join(Global.Path.data, "compose", InstallationVersion)
-  const marker = path.join(root, ".extracted")
-
-  if (!InstallationLocal) {
-    const exists = await fs
-      .stat(marker)
-      .then(() => true)
-      .catch(() => false)
-    if (exists) return root
-  }
+  const skillsDir = path.join(root, "skills")
 
   const all = await bundle()
+  // Bundle not shipped in this runtime (no readable .bundle / resources dir) ->
+  // nothing to extract; compose degrades to "no skills".
+  if (Object.keys(all).length === 0) return root
+
+  if (!InstallationLocal) {
+    // Idempotent: skip if this version's skills already exist on disk. Keyed on
+    // the skills dir (not a marker file) so a prior build that shipped an EMPTY
+    // bundle self-heals once the real bundle is present, instead of being locked
+    // out by a stale success marker.
+    const existing = await fs.readdir(skillsDir).catch(() => [])
+    if (existing.length > 0) return root
+  }
+
   for (const [skillName, files] of Object.entries(all)) {
-    const skillDir = path.join(root, "skills", skillName)
+    const skillDir = path.join(skillsDir, skillName)
     for (const [relPath, content] of Object.entries(files)) {
       const full = path.join(skillDir, relPath)
       await fs.mkdir(path.dirname(full), { recursive: true })
       await fs.writeFile(full, content)
     }
   }
-  await fs.mkdir(path.dirname(marker), { recursive: true })
-  await fs.writeFile(marker, InstallationVersion)
   return root
 }
 

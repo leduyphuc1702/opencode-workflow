@@ -11,6 +11,8 @@ import { TaskRegistryTool } from "./task-registry"
 import { TaskRegistry } from "@/task/registry"
 import { MemoryTool } from "./memory"
 import { Memory } from "@/memory"
+import { HistoryTool } from "./history"
+import { History } from "@/history"
 import { TaskStatusTool } from "./task_status"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
@@ -157,6 +159,12 @@ const baseLayer: Layer.Layer<
     const task = yield* TaskTool
     const taskRegistryTool = yield* TaskRegistryTool
     const memoryTool = yield* MemoryTool
+    // Provide History.defaultLayer locally so the tool is self-contained and
+    // History.Service does NOT enter the ToolRegistry baseLayer R union. That
+    // union is already huge; one more member tips tsgo over its whole-program
+    // complexity ceiling (spurious errors surface in packages/llm). Self-
+    // providing keeps the union size unchanged.
+    const historyTool = yield* HistoryTool.pipe(Effect.provide(History.defaultLayer))
     const taskStatus = yield* TaskStatusTool
     const read = yield* ReadTool
     const question = yield* QuestionTool
@@ -295,6 +303,7 @@ const baseLayer: Layer.Layer<
           task: Tool.init(task),
           task_registry: Tool.init(taskRegistryTool),
           memory: Tool.init(memoryTool),
+          history: Tool.init(historyTool),
           task_status: Tool.init(taskStatus),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
@@ -342,6 +351,7 @@ const baseLayer: Layer.Layer<
             tool.task,
             tool.task_registry,
             tool.memory,
+            tool.history,
             ...(flags.experimentalBackgroundSubagents ? [tool.task_status] : []),
             tool.fetch,
             tool.todo,

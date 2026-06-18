@@ -17,6 +17,7 @@ const codegraphBundle = path.join(
   `codegraph-${process.platform}-${process.arch}`,
 )
 const openComputerUseBundle = path.join(rootDir, "packages", "desktop", "node_modules", "open-computer-use")
+const composeBundle = path.join(rootDir, "packages", "opencode", "src", "skill", "compose", ".bundle")
 const openComputerUseFilter = (() => {
   const base = ["package.json", "LICENSE", "README.md"]
   if (process.platform === "darwin") return ["dist/Open Computer Use.app/**", ...base]
@@ -64,6 +65,13 @@ const getBase = (): Configuration => ({
       from: openComputerUseBundle,
       to: "open-computer-use/",
       filter: openComputerUseFilter,
+    },
+    {
+      // Compose skill bundle: shipped as an on-disk resource (NOT inlined into
+      // the JS) so the opencode server reads it from process.resourcesPath at
+      // runtime. Inlining as .ts/.js tips tsgo over its complexity ceiling.
+      from: composeBundle,
+      to: "compose-bundle/",
     },
   ],
   mac: {

@@ -1,0 +1,30 @@
+Search the raw conversation trajectory (every indexed user/assistant
+message, tool input, tool error, …) with FTS5/BM25. Use this for VERBATIM
+recall — the exact words said, the exact command run, the exact error
+string — across this and past sessions.
+
+HISTORY vs MEMORY:
+- memory tool = curated, summarized knowledge (MEMORY.md, checkpoints,
+  notes). Paraphrased; good for "what did we decide / learn".
+- history tool = raw, byte-faithful conversation parts. Good for "what
+  EXACTLY was said / the precise command / the literal error".
+When a memory hit only approximates a literal you need, come here.
+
+QUERY GUIDELINES:
+- Queries are tokenized (punctuation → separators) and AND-joined, so every
+  word must appear in a part. Prefer 1–3 distinctive terms.
+- A literal like postgres://host:5433 is indexed as tokens postgres, host,
+  5433 — search one distinctive token, not the full string.
+
+FILTERS (params or inline field prefixes in the query):
+- scope: project (default, current project) | global (all projects)
+- kind: user_text | assistant_text | tool_input | tool_output | tool_error
+  | reasoning
+- tool_name: e.g. bash, edit (matches tool parts)
+- session_id: restrict to one session
+Inline form works too: "kind:tool_error timeout", "tool:bash deploy",
+"session:<id> migration". Explicit params override inline prefixes. At least
+one non-field search term is required.
+
+Results are BM25-ranked verbatim snippets with session/message ids. Snippets
+are truncated; narrow or widen the query to refine.
